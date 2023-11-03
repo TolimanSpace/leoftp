@@ -26,6 +26,19 @@ pub struct Reciever {
 }
 
 impl Reciever {
+    pub fn new(workdir_folder: PathBuf, result_folder: PathBuf) -> anyhow::Result<Self> {
+        // Ensure that both folders exist
+        std::fs::create_dir_all(&workdir_folder)?;
+        std::fs::create_dir_all(&result_folder)?;
+
+        Ok(Self {
+            workdir_folder,
+            result_folder,
+
+            control_msg_queue: Vec::new(),
+        })
+    }
+
     pub fn receive_chunk(&mut self, chunk: Chunk) -> anyhow::Result<()> {
         // Ensure the folder for this file exists
         let file_folder = self.workdir_folder.join(chunk.file_id.to_string());
@@ -82,10 +95,17 @@ impl Reciever {
         for file_folder in file_folders {
             if is_file_finished(&file_folder)? {
                 write_finished_file_to_output_folder(&file_folder, &self.result_folder)?;
+
+                // Delete the file folder
+                std::fs::remove_dir_all(&file_folder)?;
             }
         }
 
         Ok(())
+    }
+
+    pub fn iter_control_messages(&mut self) -> impl Iterator<Item = ControlMessage> + '_ {
+        self.control_msg_queue.drain(..)
     }
 }
 
@@ -95,7 +115,7 @@ fn is_file_finished(file_folder: &Path) -> anyhow::Result<bool> {
         return Ok(false);
     }
 
-    let header = FileHeaderData::deserialize_from_stream(File::open(header_json_path)?)?;
+    let header = FileHeaderData::deserialize_from_json_stream(File::open(header_json_path)?)?;
 
     for part_index in 0..header.part_count {
         let filename = format!("{}.bin", part_index);
@@ -114,7 +134,7 @@ fn write_finished_file_to_output_folder(
     output_folder: &Path,
 ) -> anyhow::Result<()> {
     let header_json_path = file_folder.join("header.json");
-    let header = FileHeaderData::deserialize_from_stream(File::open(header_json_path)?)?;
+    let header = FileHeaderData::deserialize_from_json_stream(File::open(header_json_path)?)?;
 
     let filename = header.name;
 

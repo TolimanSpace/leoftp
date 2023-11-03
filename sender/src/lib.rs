@@ -23,13 +23,13 @@ pub struct FileServer {
     _ready_folder: ReadyFolderThreads,
 
     chunks_rcv: Receiver<Chunk>,
-    confirmations_snd: Sender<ControlMessage>,
+    control_snd: Sender<ControlMessage>,
 }
 
 impl FileServer {
     pub fn spawn(input_folder: PathBuf, workdir: PathBuf) -> io::Result<Self> {
         let (new_file_snd, new_file_rcv) = crossbeam_channel::unbounded();
-        let (confirmations_snd, confirmations_rcv) = crossbeam_channel::unbounded();
+        let (control_snd, control_rcv) = crossbeam_channel::unbounded();
 
         // We need to make sure chunks is bounded, so it doesn't overflow memory
         let (chunks_snd, chunks_rcv) = crossbeam_channel::bounded(10);
@@ -48,11 +48,11 @@ impl FileServer {
                 ready_folder,
                 new_file_rcv,
                 chunks_snd,
-                confirmations_rcv,
+                control_rcv,
             ),
 
             chunks_rcv,
-            confirmations_snd,
+            control_snd: control_snd,
         })
     }
 
@@ -60,7 +60,7 @@ impl FileServer {
         self.chunks_rcv.recv().unwrap()
     }
 
-    pub fn send_confirmation(&self, confirmation: ControlMessage) {
-        self.confirmations_snd.send(confirmation).unwrap();
+    pub fn send_control_msg(&self, control: ControlMessage) {
+        self.control_snd.send(control).unwrap();
     }
 }

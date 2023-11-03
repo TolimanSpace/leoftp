@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = "1.0.75"
+anyhow = { version = "1.0.75", features = ["backtrace"] }
 uuid = { version = "1.5.0", features = ["serde", "v4"] }
 common = { path = "../common" }

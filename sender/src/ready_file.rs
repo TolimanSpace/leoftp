@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use common::{
     chunks::Chunk,
     header::{FileHeaderData, FilePartId},
@@ -35,28 +35,25 @@ pub struct ReadyFile {
 // Ready folder considerations:
 // - If any of the files are missing, then the folder is invalid and should be deleted (`file` is always copied in last, so if it's missing, then the folder is incomplete)
 
-pub fn parse_ready_folder(path: PathBuf) -> io::Result<ReadyFile> {
+pub fn parse_ready_folder(path: PathBuf) -> anyhow::Result<ReadyFile> {
     // First, check that all the files/folders are there
     let file_path = path.join("file");
     if !file_path.exists() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "File is missing"));
+        bail!("File is missing");
     }
 
     let header_path = path.join("header");
     if !header_path.exists() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "Header is missing"));
+        bail!("Header is missing");
     }
 
     let unsent_parts_path = path.join("unsent-parts");
     if !unsent_parts_path.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "Unsent parts folder is missing",
-        ));
+        bail!("Unsent parts folder is missing");
     }
 
     // Then, parse the metadata
-    let header = FileHeaderData::deserialize_from_json_stream(&mut File::open(header_path)?)?;
+    let header = FileHeaderData::deserialize_from_stream(&mut File::open(header_path)?)?;
 
     // Then, parse the unsent parts
     let mut unsent_parts = Vec::new();
