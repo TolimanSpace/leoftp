@@ -5,7 +5,7 @@ use common::control::ControlMessage;
 pub fn main() {
     let base_folder = PathBuf::from("./testdata");
 
-    let snd_folder = base_folder.join("rcv");
+    let snd_folder = base_folder.join("snd");
     let rcv_folder = base_folder.join("rcv");
 
     let snd_input_folder = snd_folder.join("input");
@@ -14,12 +14,13 @@ pub fn main() {
     let rcv_pending_folder = rcv_folder.join("pending");
     let rcv_finished_folder = rcv_folder.join("finished");
 
+    // Spawn the sender and receiver
     let snd_file_server = sender::FileServer::spawn(snd_input_folder, snd_workdir_folder).unwrap();
     let mut rcv_file_server =
         receiver::Reciever::new(rcv_pending_folder, rcv_finished_folder).unwrap();
 
+    // For the sender, spawn a thread+channel to pass the chunks through, so we can add a timeout when waiting for new chunks
     let (chunks_snd, chunks_rcv) = crossbeam_channel::bounded(10);
-
     let snd_file_server = Arc::new(snd_file_server);
     let thread_snd_file_server = snd_file_server.clone();
     thread::spawn(move || loop {
