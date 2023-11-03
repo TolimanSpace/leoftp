@@ -20,9 +20,21 @@ use crate::{
     FILE_PART_SIZE,
 };
 
-pub struct Confirmation {
-    file_id: Uuid,
-    part_index: FilePartId,
+pub enum ControlMessage {
+    // Confirm that a part of a file was successfully received
+    ConfirmPart {
+        file_id: Uuid,
+        part_index: FilePartId,
+    },
+
+    // Delete a file from the ready folder, in case some error happened
+    DeleteFile {
+        file_id: Uuid,
+    },
+
+    // The sending loop pauses until control messages come, so if we just want it to unpause without
+    // any other messages, then we can send this
+    Continue,
 }
 
 pub struct ReadyFolderThreads {
@@ -34,7 +46,7 @@ impl ReadyFolderThreads {
         path: PathBuf,
         new_file_rcv: Receiver<PathBuf>,
         chunks_snd: Sender<Chunk>,
-        confirmation_rcv: Receiver<Confirmation>,
+        confirmation_rcv: Receiver<ControlMessage>,
     ) -> Self {
         let handler = ReadyFolderHandler { path };
 
@@ -48,7 +60,7 @@ fn spawn_chunk_sender(
     handler: ReadyFolderHandler,
     new_file_rcv: Receiver<PathBuf>,
     chunks_snd: Sender<Chunk>,
-    confirmation_rcv: Receiver<Confirmation>,
+    confirmation_rcv: Receiver<ControlMessage>,
 ) {
     std::thread::spawn(move || loop {
         // TODO: Include more context in these error logs
@@ -141,8 +153,23 @@ fn spawn_chunk_sender(
                 }
             };
 
-            if let Err(err) = handler.process_confirmation(confirmation) {
-                println!("Failed to process confirmation: {:?}", err);
+            match confirmation {
+                ControlMessage::ConfirmPart {
+                    file_id,
+                    part_index,
+                } => {
+                    let process_result = handler.process_confirmation(file_id, part_index);
+                    if let Err(err) = process_result {
+                        println!("Failed to process confirmation: {:?}", err);
+                    }
+                }
+                ControlMessage::DeleteFile { file_id } => {
+                    let delete_result = handler.delete_folder(file_id);
+                    if let Err(err) = delete_result {
+                        println!("Failed to delete folder: {:?}", err);
+                    }
+                }
+                ControlMessage::Continue => {}
             }
         }
     });
@@ -157,14 +184,22 @@ impl ReadyFolderHandler {
         self.path.join(file_id.to_string())
     }
 
-    fn process_confirmation(&self, confirmation: Confirmation) -> anyhow::Result<()> {
-        let folder_path = self.get_folder_path(confirmation.file_id);
+    fn process_confirmation(&self, file_id: Uuid, part_index: FilePartId) -> anyhow::Result<()> {
+        let folder_path = self.get_folder_path(file_id);
 
-        mark_part_as_sent(&folder_path, confirmation.part_index)?;
+        mark_part_as_sent(&folder_path, part_index)?;
         if is_file_fully_confirmed(&folder_path)? {
             // Delete the whole folder, as it's no longer needed
             std::fs::remove_dir_all(&folder_path).context("Failed to remove ready folder")?;
         }
+
+        Ok(())
+    }
+
+    fn delete_folder(&self, file_id: Uuid) -> anyhow::Result<()> {
+        let folder_path = self.get_folder_path(file_id);
+
+        std::fs::remove_dir_all(&folder_path).context("Failed to remove ready folder")?;
 
         Ok(())
     }

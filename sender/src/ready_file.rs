@@ -2,8 +2,6 @@ use std::{
     fs::{self, File},
     io::{self, Read, Seek},
     path::{Path, PathBuf},
-    slice::Chunks,
-    time::Instant,
 };
 
 use anyhow::Context;
@@ -11,8 +9,6 @@ use common::{
     chunks::Chunk,
     header::{FileHeaderData, FilePartId},
 };
-use serde::{Deserialize, Serialize};
-use xxhash_rust::xxh3;
 
 use crate::FILE_PART_SIZE;
 

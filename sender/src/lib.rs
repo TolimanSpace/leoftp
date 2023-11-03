@@ -3,7 +3,7 @@ use std::{io, path::PathBuf};
 use common::chunks::Chunk;
 use crossbeam_channel::{Receiver, Sender};
 use input_folder::InputFolderThreads;
-use ready_folder::{Confirmation, ReadyFolderThreads};
+use ready_folder::{ControlMessage, ReadyFolderThreads};
 mod input_folder;
 mod ready_file;
 mod ready_folder;
@@ -23,7 +23,7 @@ pub struct FileServer {
     _ready_folder: ReadyFolderThreads,
 
     chunks_rcv: Receiver<Chunk>,
-    confirmations_snd: Sender<Confirmation>,
+    confirmations_snd: Sender<ControlMessage>,
 }
 
 impl FileServer {
@@ -60,7 +60,7 @@ impl FileServer {
         self.chunks_rcv.recv().unwrap()
     }
 
-    pub fn send_confirmation(&self, confirmation: Confirmation) {
+    pub fn send_confirmation(&self, confirmation: ControlMessage) {
         self.confirmations_snd.send(confirmation).unwrap();
     }
 }
