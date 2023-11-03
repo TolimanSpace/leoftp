@@ -1,0 +1,2 @@
+[workspace]
+members = ["sender", "receiver", "tester", "common"]
