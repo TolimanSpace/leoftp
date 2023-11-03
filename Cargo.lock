@@ -206,6 +206,7 @@ dependencies = [
 name = "receiver"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "common",
  "uuid",
 ]

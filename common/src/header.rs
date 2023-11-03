@@ -67,22 +67,22 @@ pub struct FileHeaderData {
 }
 
 impl FileHeaderData {
-    pub fn serialize_to_stream(&self, stream: &mut impl std::io::Write) -> bincode::Result<()> {
+    pub fn serialize_to_stream(&self, stream: impl std::io::Write) -> bincode::Result<()> {
         bincode::serialize_into(stream, self)?;
         Ok(())
     }
 
-    pub fn deserialize_from_stream(stream: &mut impl std::io::Read) -> bincode::Result<Self> {
+    pub fn deserialize_from_stream(stream: impl std::io::Read) -> bincode::Result<Self> {
         let data = bincode::deserialize_from(stream)?;
         Ok(data)
     }
 
-    pub fn serialize_to_json_stream(&self, stream: &mut impl std::io::Write) -> io::Result<()> {
+    pub fn serialize_to_json_stream(&self, stream: impl std::io::Write) -> io::Result<()> {
         serde_json::to_writer(stream, self)?;
         Ok(())
     }
 
-    pub fn deserialize_from_json_stream(stream: &mut impl std::io::Read) -> io::Result<Self> {
+    pub fn deserialize_from_json_stream(stream: impl std::io::Read) -> io::Result<Self> {
         let data = serde_json::from_reader(stream)?;
         Ok(data)
     }

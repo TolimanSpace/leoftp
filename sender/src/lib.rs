@@ -1,9 +1,9 @@
 use std::{io, path::PathBuf};
 
-use common::chunks::Chunk;
+use common::{chunks::Chunk, control::ControlMessage};
 use crossbeam_channel::{Receiver, Sender};
 use input_folder::InputFolderThreads;
-use ready_folder::{ControlMessage, ReadyFolderThreads};
+use ready_folder::ReadyFolderThreads;
 mod input_folder;
 mod ready_file;
 mod ready_folder;
