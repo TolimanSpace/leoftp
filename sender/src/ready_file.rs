@@ -87,12 +87,6 @@ pub fn write_ready_file_folder(
         File::create(&header_path).context("Failed to create header file in destination folder")?;
     header.serialize_to_stream(&mut header_file)?;
 
-    // Write header
-    let header_path = destination_path.join("header");
-    let mut header_file =
-        File::create(&header_path).context("Failed to create header file in destination folder")?;
-    header.serialize_to_stream(&mut header_file)?;
-
     // Write header json
     let header_json_path = destination_path.join("header.json");
     let mut header_json_file = File::create(&header_json_path)
