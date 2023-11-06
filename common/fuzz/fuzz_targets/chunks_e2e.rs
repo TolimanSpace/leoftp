@@ -2,7 +2,7 @@
 
 use std::io::{Cursor, Seek, SeekFrom};
 
-use common::{binary_serialize::BinarySerialize, chunks::Chunk, header::FilePartId};
+use common::{binary_serialize::BinarySerialize, chunks::Chunk};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: Chunk| {
