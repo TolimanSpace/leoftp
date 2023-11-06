@@ -50,7 +50,7 @@ impl Reciever {
 
                 // Write the header json
                 let header_json_path = file_folder.join("header.json");
-                let mut header_json_file = File::create(&header_json_path)
+                let mut header_json_file = File::create(header_json_path)
                     .context("Failed to create header json file in destination folder")?;
 
                 header.serialize_to_json_stream(&mut header_json_file)?;
@@ -59,7 +59,7 @@ impl Reciever {
                 let filename = format!("{}.bin", part_index);
 
                 let part_path = file_folder.join(filename);
-                let mut part_file = File::create(&part_path)
+                let mut part_file = File::create(part_path)
                     .context("Failed to create part file in destination folder")?;
 
                 part_file.write_all(&chunk.data)?;

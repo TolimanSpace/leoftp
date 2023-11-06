@@ -100,14 +100,14 @@ pub fn write_ready_file_folder(
 
     // Write the header part
     let header_part = FilePartId::Header;
-    let header_part_path = unsent_parts_path.join(header_part.to_string());
+    let header_part_path = unsent_parts_path.join(header_part.as_string());
     File::create(&header_part_path)
         .context("Failed to create unsent part file in destination folder")?;
 
     // Write the body parts
     for body_part in 0..header.part_count {
-        let part = FilePartId::Part(body_part as u64);
-        let part_path = unsent_parts_path.join(part.to_string());
+        let part = FilePartId::Part(body_part);
+        let part_path = unsent_parts_path.join(part.as_string());
         File::create(&part_path)
             .context("Failed to create unsent part file in destination folder")?;
     }
@@ -152,7 +152,7 @@ impl ReadyFile {
 
 pub fn mark_part_as_sent(folder: &Path, part: FilePartId) -> anyhow::Result<()> {
     let unsent_parts_path = folder.join("unsent-parts");
-    let part_path = unsent_parts_path.join(part.to_string());
+    let part_path = unsent_parts_path.join(part.as_string());
     if !part_path.exists() {
         return Ok(()); // Already removed
     }

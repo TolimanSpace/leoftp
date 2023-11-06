@@ -14,11 +14,11 @@ impl FilePartId {
         if s == "header" {
             Some(FilePartId::Header)
         } else {
-            s.parse::<u64>().ok().map(|i| FilePartId::Part(i))
+            s.parse::<u64>().ok().map(FilePartId::Part)
         }
     }
 
-    pub fn to_string(&self) -> String {
+    pub fn as_string(&self) -> String {
         match self {
             FilePartId::Header => "header".to_string(),
             FilePartId::Part(i) => i.to_string(),

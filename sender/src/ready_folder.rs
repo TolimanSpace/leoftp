@@ -183,7 +183,7 @@ impl ReadyFolderHandler {
     fn delete_folder(&self, file_id: Uuid) -> anyhow::Result<()> {
         let folder_path = self.get_folder_path(file_id);
 
-        std::fs::remove_dir_all(&folder_path).context("Failed to remove ready folder")?;
+        std::fs::remove_dir_all(folder_path).context("Failed to remove ready folder")?;
 
         Ok(())
     }

@@ -52,7 +52,7 @@ impl FileServer {
             ),
 
             chunks_rcv,
-            control_snd: control_snd,
+            control_snd,
         })
     }
 
