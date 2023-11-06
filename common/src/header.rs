@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::io;
 use uuid::Uuid;
 
-use crate::binary_serialize::BinarySerialize;
+use crate::{binary_serialize::BinarySerialize, validity::ValidityCheck};
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum FilePartId {
@@ -45,6 +45,15 @@ impl FilePartId {
             FilePartId::Header
         } else {
             FilePartId::Part(i)
+        }
+    }
+}
+
+impl ValidityCheck for FilePartId {
+    fn is_valid(&self) -> bool {
+        match self {
+            FilePartId::Header => true,
+            FilePartId::Part(i) => *i != u32::MAX,
         }
     }
 }
@@ -157,6 +166,12 @@ impl BinarySerialize for FileHeaderData {
             part_count,
             size,
         })
+    }
+}
+
+impl ValidityCheck for FileHeaderData {
+    fn is_valid(&self) -> bool {
+        self.name.len() <= 1024
     }
 }
 

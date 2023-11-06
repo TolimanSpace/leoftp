@@ -2,12 +2,11 @@
 
 use std::io::{Cursor, Seek, SeekFrom};
 
-use common::{binary_serialize::BinarySerialize, header::FileHeaderData};
+use common::{binary_serialize::BinarySerialize, header::FileHeaderData, validity::ValidityCheck};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: FileHeaderData| {
-    if data.name.len() > 1024 {
-        // Not part of the spec
+    if !data.is_valid() {
         return;
     }
 

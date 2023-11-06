@@ -2,12 +2,11 @@
 
 use std::io::{Cursor, Seek, SeekFrom};
 
-use common::{binary_serialize::BinarySerialize, chunks::Chunk};
+use common::{binary_serialize::BinarySerialize, chunks::Chunk, validity::ValidityCheck};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: Chunk| {
-    if data.data.len() > 1048576 {
-        // Not part of the spec
+    if !data.is_valid() {
         return;
     }
 

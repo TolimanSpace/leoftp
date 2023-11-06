@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::{binary_serialize::BinarySerialize, header::FilePartId};
+use crate::{binary_serialize::BinarySerialize, header::FilePartId, validity::ValidityCheck};
 
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,6 +79,16 @@ impl BinarySerialize for ControlMessage {
                 std::io::ErrorKind::InvalidData,
                 "Invalid message type",
             )),
+        }
+    }
+}
+
+impl ValidityCheck for ControlMessage {
+    fn is_valid(&self) -> bool {
+        match self {
+            ControlMessage::ConfirmPart { part_index, .. } => part_index.is_valid(),
+            ControlMessage::DeleteFile { .. } => true,
+            ControlMessage::Continue => true,
         }
     }
 }

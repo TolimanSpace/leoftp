@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::{binary_serialize::BinarySerialize, header::FilePartId};
+use crate::{binary_serialize::BinarySerialize, header::FilePartId, validity::ValidityCheck};
 
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 #[derive(Clone, Debug, PartialEq)]
@@ -61,6 +61,12 @@ impl BinarySerialize for Chunk {
             part,
             data,
         })
+    }
+}
+
+impl ValidityCheck for Chunk {
+    fn is_valid(&self) -> bool {
+        self.data.len() <= 1048576
     }
 }
 
