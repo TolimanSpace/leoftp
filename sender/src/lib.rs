@@ -15,7 +15,7 @@ mod ready_folder;
 // 4. File parts are sent to the radio, including the file header/metadata
 // 5. Whenever we get a confirmation that a file part has been successfuly sent, we remove it from the ready folder.
 
-const FILE_PART_SIZE: u64 = 1024 * 64; // 64kb
+const FILE_PART_SIZE: u32 = 1024 * 64; // 64kb
 
 /// The file server. It automatically has a queue of chunks to send, and a queue of confirmations to process.
 pub struct FileServer {

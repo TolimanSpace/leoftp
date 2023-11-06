@@ -211,21 +211,21 @@ pub fn generate_file_header(path: &Path) -> io::Result<FileHeaderData> {
     let file_created_date = file.metadata()?.created()?;
     // Convert SystemTime to DateTime<Utc>
     let datetime: DateTime<Utc> = file_created_date.into();
-    // Format the datetime to ISO 8601
-    let iso_string = datetime.to_rfc3339();
+    // Format the datetime to number of nanoseconds since the unix epoch
+    let date = datetime.timestamp_nanos_opt().unwrap_or_default();
 
-    let part_count = if file_size % FILE_PART_SIZE == 0 {
-        file_size / FILE_PART_SIZE
+    let part_count = if file_size % FILE_PART_SIZE as u64 == 0 {
+        file_size / FILE_PART_SIZE as u64
     } else {
-        file_size / FILE_PART_SIZE + 1
+        file_size / FILE_PART_SIZE as u64 + 1
     };
 
     let file_header = FileHeaderData {
         id: uuid::Uuid::new_v4(),
         name: path.file_name().unwrap().to_str().unwrap().to_string(),
-        date: iso_string,
+        date,
         size: file_size,
-        part_count,
+        part_count: part_count as u32,
     };
 
     Ok(file_header)

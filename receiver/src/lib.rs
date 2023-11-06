@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::Context;
 use common::{
+    binary_serialize::BinarySerialize,
     chunks::Chunk,
     control::ControlMessage,
     header::{FileHeaderData, FilePartId},
@@ -46,7 +47,7 @@ impl Reciever {
 
         match chunk.part {
             FilePartId::Header => {
-                let header = FileHeaderData::deserialize_from_stream(Cursor::new(chunk.data))?;
+                let header = FileHeaderData::deserialize_from_stream(&mut Cursor::new(chunk.data))?;
 
                 // Write the header json
                 let header_json_path = file_folder.join("header.json");

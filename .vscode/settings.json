@@ -6,5 +6,6 @@
     "--all",
     "--message-format=json",
     "--all-targets"
-  ]
+  ],
+  "rust-analyzer.linkedProjects": ["./Cargo.toml", "./common/fuzz/Cargo.toml"]
 }

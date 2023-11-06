@@ -6,6 +6,7 @@ use std::{
 
 use anyhow::{bail, Context};
 use common::{
+    binary_serialize::BinarySerialize,
     chunks::Chunk,
     header::{FileHeaderData, FilePartId},
 };
@@ -134,7 +135,7 @@ impl ReadyFile {
                 let mut file = File::open(self.folder_path.join("file"))?;
 
                 let mut data = vec![0u8; FILE_PART_SIZE as usize];
-                file.seek(io::SeekFrom::Start(i * FILE_PART_SIZE))?;
+                file.seek(io::SeekFrom::Start((i * FILE_PART_SIZE) as u64))?;
                 let byte_count = file.read(&mut data)?;
                 data.truncate(byte_count);
 

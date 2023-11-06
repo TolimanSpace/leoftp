@@ -1,0 +1,60 @@
+[package]
+name = "common-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.common]
+path = ".."
+features = ["fuzzing"]
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "chunks_e2e"
+path = "fuzz_targets/chunks_e2e.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "chunks_arbitrary"
+path = "fuzz_targets/chunks_arbitrary.rs"
+test = false
+doc = false
+
+
+[[bin]]
+name = "header_e2e"
+path = "fuzz_targets/header_e2e.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "header_arbitrary"
+path = "fuzz_targets/header_arbitrary.rs"
+test = false
+doc = false
+
+
+[[bin]]
+name = "control_e2e"
+path = "fuzz_targets/control_e2e.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "control_arbitrary"
+path = "fuzz_targets/control_arbitrary.rs"
+test = false
+doc = false
