@@ -97,7 +97,7 @@ impl FileHeaderData {
 }
 
 impl BinarySerialize for FileHeaderData {
-    fn serialize_to_stream<W: std::io::Write>(&self, writer: &mut W) -> io::Result<()> {
+    fn serialize_to_stream(&self, writer: &mut impl std::io::Write) -> io::Result<()> {
         let id = self.id.as_bytes();
         writer.write_all(id)?;
 
@@ -119,7 +119,16 @@ impl BinarySerialize for FileHeaderData {
         Ok(())
     }
 
-    fn deserialize_from_stream<R: std::io::Read>(reader: &mut R) -> io::Result<Self>
+    fn length_when_serialized(&self) -> u32 {
+        16 // UUID
+        + 4 // Name length
+        + self.name.len() as u32 // Name
+        + 8 // Date
+        + 4 // Part count
+        + 8 // Size
+    }
+
+    fn deserialize_from_stream(reader: &mut impl std::io::Read) -> io::Result<Self>
     where
         Self: Sized,
     {

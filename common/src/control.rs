@@ -22,7 +22,7 @@ pub enum ControlMessage {
 }
 
 impl BinarySerialize for ControlMessage {
-    fn serialize_to_stream<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+    fn serialize_to_stream(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
         match self {
             ControlMessage::ConfirmPart {
                 file_id,
@@ -44,7 +44,15 @@ impl BinarySerialize for ControlMessage {
         Ok(())
     }
 
-    fn deserialize_from_stream<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self>
+    fn length_when_serialized(&self) -> u32 {
+        1 + match self {
+            ControlMessage::ConfirmPart { .. } => 16 + 4,
+            ControlMessage::DeleteFile { .. } => 16,
+            ControlMessage::Continue => 0,
+        }
+    }
+
+    fn deserialize_from_stream(reader: &mut impl std::io::Read) -> std::io::Result<Self>
     where
         Self: Sized,
     {

@@ -13,6 +13,9 @@ fuzz_target!(|data: ControlMessage| {
     let mut stream = Cursor::new(Vec::new());
 
     data.serialize_to_stream(&mut stream).unwrap();
+
+    assert_eq!(data.length_when_serialized(), stream.position() as u32);
+
     stream.seek(SeekFrom::Start(0)).unwrap();
     let deserialized = ControlMessage::deserialize_from_stream(&mut stream).unwrap();
 

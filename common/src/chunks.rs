@@ -11,7 +11,7 @@ pub struct Chunk {
 }
 
 impl BinarySerialize for Chunk {
-    fn serialize_to_stream<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+    fn serialize_to_stream(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
         let id = self.file_id.as_bytes();
         writer.write_all(id)?;
 
@@ -26,7 +26,14 @@ impl BinarySerialize for Chunk {
         Ok(())
     }
 
-    fn deserialize_from_stream<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self>
+    fn length_when_serialized(&self) -> u32 {
+        16 // UUID
+        + 4 // Part index
+        + 4 // Data length
+        + self.data.len() as u32 // Data
+    }
+
+    fn deserialize_from_stream(reader: &mut impl std::io::Read) -> std::io::Result<Self>
     where
         Self: Sized,
     {
@@ -49,7 +56,7 @@ impl BinarySerialize for Chunk {
         if len > 1048576 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "Chunk data length is too large",
+                format!("Chunk length {} exceeds 1 MiB", len),
             ));
         }
 
