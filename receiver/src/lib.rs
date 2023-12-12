@@ -11,6 +11,7 @@ use common::{
     control::ControlMessage,
     header::{FileHeaderData, FilePartId},
 };
+use uuid::Uuid;
 
 // Received file folder structure
 // [file uuid]/
@@ -40,17 +41,33 @@ impl Reciever {
         })
     }
 
+    fn get_data_folder_path_for_id(&self, file_id: Uuid) -> PathBuf {
+        self.workdir_folder.join(file_id.to_string())
+    }
+
     pub fn receive_chunk(&mut self, chunk: Chunk) -> anyhow::Result<()> {
+        let path = self.get_data_folder_path_for_id(chunk.file_id);
+
+        if is_file_finished(&path)? {
+            // Already finished, confirm and ignore
+            self.control_msg_queue.push(ControlMessage::ConfirmPart {
+                file_id: chunk.file_id,
+                part_index: chunk.part,
+            });
+
+            return Ok(());
+        }
+
         // Ensure the folder for this file exists
-        let file_folder = self.workdir_folder.join(chunk.file_id.to_string());
-        std::fs::create_dir_all(&file_folder)?;
+        let file_data_folder = get_data_folder_path(&path);
+        std::fs::create_dir_all(&file_data_folder)?;
 
         match chunk.part {
             FilePartId::Header => {
                 let header = FileHeaderData::deserialize_from_stream(&mut Cursor::new(chunk.data))?;
 
                 // Write the header json
-                let header_json_path = file_folder.join("header.json");
+                let header_json_path = file_data_folder.join("header.json");
                 let mut header_json_file = File::create(header_json_path)
                     .context("Failed to create header json file in destination folder")?;
 
@@ -59,7 +76,7 @@ impl Reciever {
             FilePartId::Part(part_index) => {
                 let filename = format!("{}.bin", part_index);
 
-                let part_path = file_folder.join(filename);
+                let part_path = file_data_folder.join(filename);
                 let mut part_file = File::create(part_path)
                     .context("Failed to create part file in destination folder")?;
 
@@ -95,10 +112,14 @@ impl Reciever {
 
         for file_folder in file_folders {
             if is_file_finished(&file_folder)? {
+                continue;
+            }
+
+            if is_file_data_finished(&file_folder)? {
                 write_finished_file_to_output_folder(&file_folder, &self.result_folder)?;
 
-                // Delete the file folder
-                std::fs::remove_dir_all(&file_folder)?;
+                // Mark as finished
+                mark_folder_as_finished(&file_folder)?;
             }
         }
 
@@ -110,8 +131,34 @@ impl Reciever {
     }
 }
 
-fn is_file_finished(file_folder: &Path) -> anyhow::Result<bool> {
-    let header_json_path = file_folder.join("header.json");
+fn get_data_folder_path(path: &Path) -> PathBuf {
+    path.join("data")
+}
+
+fn get_marker_file_path(path: &Path) -> PathBuf {
+    path.join("finished")
+}
+
+fn is_file_finished(path: &Path) -> anyhow::Result<bool> {
+    let marker_file = get_marker_file_path(path);
+    Ok(marker_file.try_exists()?)
+}
+
+fn mark_folder_as_finished(path: &Path) -> anyhow::Result<()> {
+    // Delete the data
+    let data_folder = get_data_folder_path(path);
+    std::fs::remove_dir_all(data_folder)?;
+
+    // Create the marker file
+    let marker_file = get_marker_file_path(path);
+    File::create(marker_file)?;
+    Ok(())
+}
+
+fn is_file_data_finished(file_folder: &Path) -> anyhow::Result<bool> {
+    let data_folder = get_data_folder_path(file_folder);
+
+    let header_json_path = data_folder.join("header.json");
     if !header_json_path.exists() {
         return Ok(false);
     }
@@ -120,7 +167,7 @@ fn is_file_finished(file_folder: &Path) -> anyhow::Result<bool> {
 
     for part_index in 0..header.part_count {
         let filename = format!("{}.bin", part_index);
-        let part_path = file_folder.join(filename);
+        let part_path = data_folder.join(filename);
 
         if !part_path.exists() {
             return Ok(false);
@@ -134,7 +181,8 @@ fn write_finished_file_to_output_folder(
     file_folder: &Path,
     output_folder: &Path,
 ) -> anyhow::Result<()> {
-    let header_json_path = file_folder.join("header.json");
+    let data_folder = get_data_folder_path(file_folder);
+    let header_json_path = data_folder.join("header.json");
     let header = FileHeaderData::deserialize_from_json_stream(File::open(header_json_path)?)?;
 
     let filename = header.name;
@@ -150,7 +198,7 @@ fn write_finished_file_to_output_folder(
     let mut output = File::create(output_path)?;
     for part_index in 0..header.part_count {
         let filename = format!("{}.bin", part_index);
-        let part_path = file_folder.join(filename);
+        let part_path = data_folder.join(filename);
 
         let mut part_file = File::open(part_path)?;
 

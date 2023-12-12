@@ -28,11 +28,17 @@ pub fn main() {
     });
 
     loop {
+        let mut send_remaining = 100;
         while let Ok(chunk) = chunks_rcv.recv_timeout(Duration::from_secs(1)) {
             let should_send = rand::random::<bool>();
 
             if should_send {
                 rcv_file_server.receive_chunk(chunk).unwrap();
+            }
+
+            send_remaining -= 1;
+            if send_remaining == 0 {
+                break;
             }
         }
 

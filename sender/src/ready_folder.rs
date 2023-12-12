@@ -21,6 +21,10 @@ use crate::{
     FILE_PART_SIZE,
 };
 
+use self::sender_loop::spawn_chunk_sender;
+
+mod sender_loop;
+
 pub struct ReadyFolderThreads {
     // TODO: Join handles
 }
@@ -38,125 +42,6 @@ impl ReadyFolderThreads {
 
         ReadyFolderThreads {}
     }
-}
-
-fn spawn_chunk_sender(
-    handler: ReadyFolderHandler,
-    new_file_rcv: Receiver<PathBuf>,
-    chunks_snd: Sender<Chunk>,
-    confirmation_rcv: Receiver<ControlMessage>,
-) {
-    std::thread::spawn(move || loop {
-        // TODO: Include more context in these error logs
-
-        // Then, process new recieved files
-        loop {
-            let new_file = match new_file_rcv.try_recv() {
-                Ok(new_file) => new_file,
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => return, // The queue has been removed
-            };
-
-            let header = generate_file_header(&new_file);
-            let header = match header {
-                Ok(header) => header,
-                Err(err) => {
-                    println!(
-                        "Failed to generate file header.\nFile: {:?}\nErr: {:?}",
-                        new_file, err
-                    );
-                    continue;
-                }
-            };
-
-            let path = handler.get_folder_path(header.id);
-
-            let write_result = write_ready_file_folder(path, new_file, header);
-            if let Err(err) = write_result {
-                println!("Failed to write ready file folder: {:?}", err);
-                continue;
-            }
-        }
-
-        // Find all folders
-        let folders = match handler.get_all_folders() {
-            Ok(folders) => folders,
-            Err(err) => {
-                println!("Failed to get ready folders: {:?}", err);
-
-                // Wait 1 second to not spam the error
-                std::thread::sleep(std::time::Duration::from_secs(1));
-
-                continue;
-            }
-        };
-
-        // Then, for each folder, send all chunks
-        for folder in folders {
-            let ready_file = parse_ready_folder(folder);
-            let ready_file = match ready_file {
-                Ok(ready_file) => ready_file,
-                Err(err) => {
-                    println!("Failed to parse ready folder: {:?}", err);
-                    continue;
-                }
-            };
-
-            for part in &ready_file.unsent_parts {
-                let chunk = ready_file.get_unsent_part_as_chunk(*part);
-
-                let chunk = match chunk {
-                    Ok(chunk) => chunk,
-                    Err(err) => {
-                        println!("Failed to get unsent part as chunk: {:?}", err);
-                        continue;
-                    }
-                };
-
-                let snd_result = chunks_snd.send(chunk);
-                if snd_result.is_err() {
-                    return; // The queue has been removed
-                }
-            }
-        }
-
-        // Process confirmations. Block the loop until at least one confirmation is recieved.
-        let mut first_confirmation = true;
-        loop {
-            let confirmation = if first_confirmation {
-                first_confirmation = false;
-                match confirmation_rcv.recv() {
-                    Ok(confirmation) => confirmation,
-                    Err(_) => return, // The queue has been removed
-                }
-            } else {
-                match confirmation_rcv.try_recv() {
-                    Ok(confirmation) => confirmation,
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => return, // The queue has been removed
-                }
-            };
-
-            match confirmation {
-                ControlMessage::ConfirmPart {
-                    file_id,
-                    part_index,
-                } => {
-                    let process_result = handler.process_confirmation(file_id, part_index);
-                    if let Err(err) = process_result {
-                        println!("Failed to process confirmation: {:?}", err);
-                    }
-                }
-                ControlMessage::DeleteFile { file_id } => {
-                    let delete_result = handler.delete_folder(file_id);
-                    if let Err(err) = delete_result {
-                        println!("Failed to delete folder: {:?}", err);
-                    }
-                }
-                ControlMessage::Continue => {}
-            }
-        }
-    });
 }
 
 pub struct ReadyFolderHandler {

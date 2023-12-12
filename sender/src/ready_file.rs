@@ -75,8 +75,8 @@ pub fn parse_ready_folder(path: PathBuf) -> anyhow::Result<ReadyFile> {
 }
 
 pub fn write_ready_file_folder(
-    destination_path: PathBuf,
-    source_file: PathBuf,
+    destination_path: &Path,
+    source_file: &Path,
     header: FileHeaderData,
 ) -> anyhow::Result<()> {
     // Make sure the destination folder exists
