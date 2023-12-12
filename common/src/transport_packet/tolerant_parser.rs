@@ -7,6 +7,14 @@ use crate::transport_packet::substream::SubstreamReader;
 
 use super::{checkpoint_stream::StreamWithCheckpoints, TransportPacket};
 
+pub fn debug_stream(stream: &mut StreamWithCheckpoints<impl Read>, len: usize) {
+    let mut buf = vec![0u8; len];
+    stream.read_exact(&mut buf).unwrap();
+    stream.rollback_n(len);
+    let chars = buf.iter().map(|&b| b as char).collect::<Vec<char>>();
+    println!("Stream: {:?}", chars);
+}
+
 pub fn parse_transport_packet_stream<T: BinarySerialize>(
     stream: impl Read,
 ) -> impl Iterator<Item = io::Result<T>> {
@@ -62,6 +70,7 @@ pub fn parse_transport_packet_stream<T: BinarySerialize>(
     })
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum SearchSignatureStatus {
     Found,
     Eof,
@@ -76,7 +85,7 @@ fn parse_until_signature(
         stream.checkpoint();
         let read = stream.read(&mut buf).unwrap();
 
-        if read == 0 {
+        if read < 4 {
             return Ok(SearchSignatureStatus::Eof);
         }
 
@@ -86,10 +95,16 @@ fn parse_until_signature(
 
             return Ok(SearchSignatureStatus::Found);
         }
+
+        stream.rollback_n(3); // Rollback by 3 so that we can find the signature if it's split across two reads
     }
 }
 
 fn index_of_signature(buf: &[u8]) -> Option<usize> {
+    if buf.len() < 6 {
+        return None;
+    }
+
     let mut i = 0;
     while i < buf.len() - 3 {
         if buf[i] == b'L' && buf[i + 1] == b'F' && buf[i + 2] == b'T' && buf[i + 3] == b'P' {
@@ -111,6 +126,8 @@ fn parse_next_packet<T: BinarySerialize>(
     let mut signature_buf = [0u8; 4];
     stream.read_exact(&mut signature_buf)?;
     debug_assert_eq!(&signature_buf, b"LFTP");
+
+    stream.checkpoint();
 
     // Parse length
     let mut length_buf = [0u8; 4];
@@ -135,22 +152,14 @@ fn parse_next_packet<T: BinarySerialize>(
     // Read ahead, ensure that the hash is valid
     let mut hasher = twox_hash::XxHash64::with_seed(0);
 
-    // let mut buffer = [0u8; 1024];
+    let mut buffer = [0u8; 1024];
     let mut parsed = 0;
-    // while parsed < length as usize {
-    //     let to_read = std::cmp::min(buffer.len(), length as usize - parsed);
-    //     stream.read_exact(&mut buffer[..to_read])?;
-    //     parsed += to_read;
-
-    //     hasher.write(&buffer[..to_read]);
-    // }
-
     while parsed < length as usize {
-        let mut buf = [0];
-        unscrambled_stream.read_exact(&mut buf)?;
-        parsed += 1;
+        let to_read = std::cmp::min(buffer.len(), length as usize - parsed);
+        unscrambled_stream.read_exact(&mut buffer[..to_read])?;
+        parsed += to_read;
 
-        hasher.write(&buf);
+        hasher.write(&buffer[..to_read]);
     }
 
     let mut hash_buf = [0u8; 8];
@@ -169,16 +178,22 @@ fn parse_next_packet<T: BinarySerialize>(
 
     let mut substream = SubstreamReader::new(UnscramblingReader::new(&mut stream), length as usize);
     let parsed = T::deserialize_from_stream(&mut substream);
+    let reached_end = substream.reached_end();
 
-    if !substream.reached_end() {
+    // Skip hash value
+    stream.skip_and_checkpoint(8);
+
+    let parsed = match parsed {
+        Ok(parsed) => Ok(parsed),
+        Err(e) => return Ok(Err(e)),
+    };
+
+    if !reached_end {
         return Ok(Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "Packet length does not match actual length",
         )));
     }
-
-    // Skip hash value
-    stream.skip_and_checkpoint(8);
 
     Ok(parsed)
 }

@@ -11,6 +11,7 @@ mod hashing;
 mod scrambling;
 mod substream;
 mod tolerant_parser;
+pub use tolerant_parser::parse_transport_packet_stream;
 
 pub const CONST_PACKET_SIGNATURE: &[u8] = b"LFTP";
 

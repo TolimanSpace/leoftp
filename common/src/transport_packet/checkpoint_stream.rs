@@ -20,7 +20,7 @@ impl<R: Read> StreamWithCheckpoints<R> {
 
     /// Checkpoint the current position.
     pub fn checkpoint(&mut self) {
-        if self.prev_data.len() > self.prev_data_pos {
+        if self.prev_data.len() >= self.prev_data_pos {
             self.prev_data.drain(..self.prev_data_pos);
             self.prev_data_pos = 0;
         }
@@ -63,6 +63,18 @@ impl<R: Read> StreamWithCheckpoints<R> {
             );
         }
         self.prev_data_pos -= n;
+    }
+
+    pub fn rollback_len(&self) -> usize {
+        self.prev_data_pos
+    }
+
+    pub fn cached_len(&self) -> usize {
+        self.prev_data.len() - self.prev_data_pos
+    }
+
+    pub fn remaining_cached_len(&self) -> usize {
+        self.prev_data.len() - self.prev_data_pos
     }
 }
 

@@ -9,6 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+arbitrary = { version = "1.3.2", features = ["derive"] }
 
 [dependencies.common]
 path = ".."
@@ -56,5 +57,17 @@ doc = false
 [[bin]]
 name = "control_arbitrary"
 path = "fuzz_targets/control_arbitrary.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "corrupt_transport_packets_e2e"
+path = "fuzz_targets/corrupt_transport_packets_e2e.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "corrupt_transport_packets_arbitrary"
+path = "fuzz_targets/corrupt_transport_packets_arbitrary.rs"
 test = false
 doc = false

@@ -52,6 +52,7 @@ dependencies = [
 name = "common-fuzz"
 version = "0.0.0"
 dependencies = [
+ "arbitrary",
  "common",
  "libfuzzer-sys",
 ]

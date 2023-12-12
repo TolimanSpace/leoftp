@@ -73,7 +73,7 @@ impl BinarySerialize for Chunk {
 
 impl ValidityCheck for Chunk {
     fn is_valid(&self) -> bool {
-        self.data.len() <= 1048576
+        self.data.len() <= 1048576 && self.part.is_valid()
     }
 }
 
