@@ -60,7 +60,7 @@ pub fn parse_transport_packet_stream<T: BinarySerialize>(
                         return Some(Err(e));
                     }
                 }
-                Ok(Err(e)) => {
+                Ok(Err(_e)) => {
                     // Error parsing data, rollback and continue
                     stream.rollback();
                     continue;
