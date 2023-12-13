@@ -269,7 +269,7 @@ fn parse_data_from_type(
 
 #[cfg(test)]
 mod tests {
-    use crate::{chunks::DataChunk, header::FilePartId};
+    use crate::chunks::DataChunk;
 
     use super::*;
 

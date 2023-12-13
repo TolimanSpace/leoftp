@@ -1,16 +1,13 @@
 use std::{
     fs::File,
-    io::{self, Cursor, Write},
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
 use anyhow::Context;
 use common::{
-    binary_serialize::BinarySerialize,
     chunks::{Chunk, HeaderChunk},
     control::{ConfirmPart, ControlMessage},
-    header::FilePartId,
-    transport_packet::TransportPacket,
 };
 use uuid::Uuid;
 

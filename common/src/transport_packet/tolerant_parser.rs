@@ -1,7 +1,6 @@
 use std::hash::Hasher;
 use std::io::{self, Read};
 
-use crate::binary_serialize::BinarySerialize;
 use crate::transport_packet::parse_data_from_type;
 use crate::transport_packet::scrambling::UnscramblingReader;
 use crate::transport_packet::substream::SubstreamReader;
@@ -208,8 +207,8 @@ fn parse_next_packet(
 mod tests {
     use super::*;
     use crate::binary_serialize::BinarySerialize;
-    use crate::chunks::{Chunk, DataChunk};
-    use crate::header::FilePartId;
+    use crate::chunks::DataChunk;
+
     use crate::transport_packet::TransportPacket;
 
     fn make_dummy_packets_list(count: usize) -> Vec<TransportPacket> {

@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::io;
-use uuid::Uuid;
 
-use crate::{binary_serialize::BinarySerialize, validity::ValidityCheck};
+use crate::validity::ValidityCheck;
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum FilePartId {

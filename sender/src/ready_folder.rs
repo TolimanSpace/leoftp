@@ -11,12 +11,10 @@ use common::{
     control::ControlMessage,
     header::FilePartId,
 };
-use crossbeam_channel::{Receiver, Sender, TryRecvError};
+use crossbeam_channel::{Receiver, Sender};
 use uuid::Uuid;
 
-use crate::ready_file::{
-    is_file_fully_confirmed, mark_part_as_sent, parse_ready_folder, write_ready_file_folder,
-};
+use crate::ready_file::{is_file_fully_confirmed, mark_part_as_sent};
 
 use self::sender_loop::spawn_chunk_sender;
 
