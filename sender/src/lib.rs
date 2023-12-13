@@ -10,12 +10,12 @@ mod ready_folder;
 
 // Procedure:
 // 1. Service creates a new file in the input folder. The file is valid as long as it has no other file handles using it.
-// 2. Sender moves the file to the pending folder. While in the pending folder, it determines any relevant metadata, such as block hashes.
+// 2. Sender moves the file to the pending folder. While in the pending folder, it determines any relevant metadata.
 // 3. Sender creates a folder in the ready folder with the same name as the file. The file gets moved in, along with a json file that represents the file's metadata.
 // 4. File parts are sent to the radio, including the file header/metadata
 // 5. Whenever we get a confirmation that a file part has been successfuly sent, we remove it from the ready folder.
 
-const FILE_PART_SIZE: u32 = 1024 * 64; // 64kb
+const DEFAULT_FILE_PART_SIZE: u32 = 1024 * 64; // 64kb
 
 /// The file server. It automatically has a queue of chunks to send, and a queue of confirmations to process.
 pub struct FileServer {
@@ -28,6 +28,14 @@ pub struct FileServer {
 
 impl FileServer {
     pub fn spawn(input_folder: PathBuf, workdir: PathBuf) -> io::Result<Self> {
+        Self::spawn_with_part_size(input_folder, workdir, DEFAULT_FILE_PART_SIZE)
+    }
+
+    pub fn spawn_with_part_size(
+        input_folder: PathBuf,
+        workdir: PathBuf,
+        file_part_size: u32,
+    ) -> io::Result<Self> {
         let (new_file_snd, new_file_rcv) = crossbeam_channel::unbounded();
         let (control_snd, control_rcv) = crossbeam_channel::unbounded();
 
@@ -49,6 +57,7 @@ impl FileServer {
                 new_file_rcv,
                 chunks_snd,
                 control_rcv,
+                file_part_size,
             ),
 
             chunks_rcv,

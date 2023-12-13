@@ -14,11 +14,8 @@ use common::{
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use uuid::Uuid;
 
-use crate::{
-    ready_file::{
-        is_file_fully_confirmed, mark_part_as_sent, parse_ready_folder, write_ready_file_folder,
-    },
-    FILE_PART_SIZE,
+use crate::ready_file::{
+    is_file_fully_confirmed, mark_part_as_sent, parse_ready_folder, write_ready_file_folder,
 };
 
 use self::sender_loop::spawn_chunk_sender;
@@ -35,8 +32,12 @@ impl ReadyFolderThreads {
         new_file_rcv: Receiver<PathBuf>,
         chunks_snd: Sender<Chunk>,
         confirmation_rcv: Receiver<ControlMessage>,
+        file_part_size: u32,
     ) -> Self {
-        let handler = ReadyFolderHandler { path };
+        let handler = ReadyFolderHandler {
+            path,
+            file_part_size,
+        };
 
         spawn_chunk_sender(handler, new_file_rcv, chunks_snd, confirmation_rcv);
 
@@ -46,6 +47,7 @@ impl ReadyFolderThreads {
 
 pub struct ReadyFolderHandler {
     path: PathBuf,
+    file_part_size: u32,
 }
 
 impl ReadyFolderHandler {
@@ -91,32 +93,33 @@ impl ReadyFolderHandler {
 
         Ok(folders)
     }
-}
 
-pub fn generate_file_header(path: &Path) -> io::Result<HeaderChunk> {
-    let file = File::open(path)?;
+    pub fn generate_file_header(&self, path: &Path) -> io::Result<HeaderChunk> {
+        let file = File::open(path)?;
 
-    let file_size = file.metadata()?.len();
+        let file_size = file.metadata()?.len();
 
-    let file_created_date = file.metadata()?.created()?;
-    // Convert SystemTime to DateTime<Utc>
-    let datetime: DateTime<Utc> = file_created_date.into();
-    // Format the datetime to number of nanoseconds since the unix epoch
-    let date = datetime.timestamp_nanos_opt().unwrap_or_default();
+        let file_created_date = file.metadata()?.created()?;
+        // Convert SystemTime to DateTime<Utc>
+        let datetime: DateTime<Utc> = file_created_date.into();
+        // Format the datetime to number of nanoseconds since the unix epoch
+        let date = datetime.timestamp_nanos_opt().unwrap_or_default();
 
-    let part_count = if file_size % FILE_PART_SIZE as u64 == 0 {
-        file_size / FILE_PART_SIZE as u64
-    } else {
-        file_size / FILE_PART_SIZE as u64 + 1
-    };
+        let part_count = if file_size % self.file_part_size as u64 == 0 {
+            file_size / self.file_part_size as u64
+        } else {
+            file_size / self.file_part_size as u64 + 1
+        };
 
-    let file_header = HeaderChunk {
-        id: uuid::Uuid::new_v4(),
-        name: path.file_name().unwrap().to_str().unwrap().to_string(),
-        date,
-        size: file_size,
-        part_count: part_count as u32,
-    };
+        let file_header = HeaderChunk {
+            id: uuid::Uuid::new_v4(),
+            name: path.file_name().unwrap().to_str().unwrap().to_string(),
+            date,
+            size: file_size,
+            part_count: part_count as u32,
+            file_part_size: self.file_part_size,
+        };
 
-    Ok(file_header)
+        Ok(file_header)
+    }
 }

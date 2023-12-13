@@ -110,6 +110,7 @@ pub struct HeaderChunk {
     pub date: i64,
     pub part_count: u32,
     pub size: u64,
+    pub file_part_size: u32,
 }
 
 impl BinarySerialize for HeaderChunk {
@@ -164,12 +165,17 @@ impl BinarySerialize for HeaderChunk {
         reader.read_exact(&mut size_bytes)?;
         let size = u64::from_le_bytes(size_bytes);
 
+        let mut file_part_size_bytes = [0; 4];
+        reader.read_exact(&mut file_part_size_bytes)?;
+        let file_part_size = u32::from_le_bytes(file_part_size_bytes);
+
         Ok(Self {
             id,
             name,
             date,
             part_count,
             size,
+            file_part_size,
         })
     }
 }
@@ -210,6 +216,7 @@ mod tests {
             date: 123456789,
             part_count: 42,
             size: 123456789,
+            file_part_size: 1024,
         };
 
         let mut buffer = Cursor::new(Vec::new());

@@ -6,7 +6,7 @@ use crossbeam_channel::{Receiver, Sender, TryRecvError};
 
 use crate::ready_file::{parse_ready_folder, write_ready_file_folder, ReadyFile};
 
-use super::{generate_file_header, ReadyFolderHandler};
+use super::ReadyFolderHandler;
 
 #[derive(Debug)]
 struct LoopKilled;
@@ -117,7 +117,7 @@ impl SenderLoopHandler {
                 Err(TryRecvError::Disconnected) => return Err(LoopKilled), // The queue has been removed
             };
 
-            let header = generate_file_header(&new_file);
+            let header = self.folder.generate_file_header(&new_file);
             let header = match header {
                 Ok(header) => header,
                 Err(err) => {

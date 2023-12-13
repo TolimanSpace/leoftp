@@ -11,8 +11,6 @@ use common::{
     header::FilePartId,
 };
 
-use crate::FILE_PART_SIZE;
-
 #[derive(Clone, Debug)]
 /// A file that's ready for sending
 pub struct ReadyFile {
@@ -125,16 +123,13 @@ pub fn write_ready_file_folder(
 impl ReadyFile {
     pub fn get_unsent_part_as_chunk(&self, part: FilePartId) -> anyhow::Result<Chunk> {
         let data = match part {
-            FilePartId::Header => {
-                let mut file = File::open(self.folder_path.join("header"))?;
-                let header = HeaderChunk::deserialize_from_stream(&mut file)?;
-                Chunk::Header(header)
-            }
+            FilePartId::Header => Chunk::Header(self.header.clone()),
             FilePartId::Part(i) => {
                 let mut file = File::open(self.folder_path.join("file"))?;
 
-                let mut data = vec![0u8; FILE_PART_SIZE as usize];
-                file.seek(io::SeekFrom::Start((i * FILE_PART_SIZE) as u64))?;
+                let part_size = self.header.file_part_size;
+                let mut data = vec![0u8; part_size as usize];
+                file.seek(io::SeekFrom::Start((i * part_size) as u64))?;
                 let byte_count = file.read(&mut data)?;
                 data.truncate(byte_count);
 
