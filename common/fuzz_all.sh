@@ -4,7 +4,7 @@
 run_fuzz() {
   filename=$(basename -- "$1")
   filename_without_ext="${filename%.*}"
-  cargo +nightly fuzz run "$filename_without_ext"
+  cargo +nightly fuzz run "$filename_without_ext" -- -max_len=32768 -timeout=5
 }
 
 export -f run_fuzz

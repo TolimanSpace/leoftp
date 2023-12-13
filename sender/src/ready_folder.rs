@@ -7,9 +7,9 @@ use std::{
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use common::{
-    chunks::Chunk,
+    chunks::{Chunk, HeaderChunk},
     control::ControlMessage,
-    header::{FileHeaderData, FilePartId},
+    header::FilePartId,
 };
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 use uuid::Uuid;
@@ -56,6 +56,11 @@ impl ReadyFolderHandler {
     fn process_confirmation(&self, file_id: Uuid, part_index: FilePartId) -> anyhow::Result<()> {
         let folder_path = self.get_folder_path(file_id);
 
+        if !folder_path.exists() {
+            // File already deleted, ignore
+            return Ok(());
+        }
+
         mark_part_as_sent(&folder_path, part_index)?;
         if is_file_fully_confirmed(&folder_path)? {
             // Delete the whole folder, as it's no longer needed
@@ -88,7 +93,7 @@ impl ReadyFolderHandler {
     }
 }
 
-pub fn generate_file_header(path: &Path) -> io::Result<FileHeaderData> {
+pub fn generate_file_header(path: &Path) -> io::Result<HeaderChunk> {
     let file = File::open(path)?;
 
     let file_size = file.metadata()?.len();
@@ -105,7 +110,7 @@ pub fn generate_file_header(path: &Path) -> io::Result<FileHeaderData> {
         file_size / FILE_PART_SIZE as u64 + 1
     };
 
-    let file_header = FileHeaderData {
+    let file_header = HeaderChunk {
         id: uuid::Uuid::new_v4(),
         name: path.file_name().unwrap().to_str().unwrap().to_string(),
         date,

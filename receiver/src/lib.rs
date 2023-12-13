@@ -7,9 +7,10 @@ use std::{
 use anyhow::Context;
 use common::{
     binary_serialize::BinarySerialize,
-    chunks::Chunk,
-    control::ControlMessage,
-    header::{FileHeaderData, FilePartId},
+    chunks::{Chunk, HeaderChunk},
+    control::{ConfirmPart, ControlMessage},
+    header::FilePartId,
+    transport_packet::TransportPacket,
 };
 use uuid::Uuid;
 
@@ -46,14 +47,17 @@ impl Reciever {
     }
 
     pub fn receive_chunk(&mut self, chunk: Chunk) -> anyhow::Result<()> {
-        let path = self.get_data_folder_path_for_id(chunk.file_id);
+        let file_id = chunk.file_id();
+        let part_index = chunk.part_index();
+        let path = self.get_data_folder_path_for_id(file_id);
 
         if is_file_finished(&path)? {
             // Already finished, confirm and ignore
-            self.control_msg_queue.push(ControlMessage::ConfirmPart {
-                file_id: chunk.file_id,
-                part_index: chunk.part,
-            });
+            self.control_msg_queue
+                .push(ControlMessage::ConfirmPart(ConfirmPart {
+                    file_id,
+                    part_index,
+                }));
 
             return Ok(());
         }
@@ -62,32 +66,36 @@ impl Reciever {
         let file_data_folder = get_data_folder_path(&path);
         std::fs::create_dir_all(&file_data_folder)?;
 
-        match chunk.part {
-            FilePartId::Header => {
-                let header = FileHeaderData::deserialize_from_stream(&mut Cursor::new(chunk.data))?;
-
+        match chunk {
+            Chunk::Header(header_chunk) => {
                 // Write the header json
-                let header_json_path = file_data_folder.join("header.json");
-                let mut header_json_file = File::create(header_json_path)
+                let header_json_tmp_path = file_data_folder.join("header.json.tmp");
+                let mut header_json_file = File::create(&header_json_tmp_path)
                     .context("Failed to create header json file in destination folder")?;
 
-                header.serialize_to_json_stream(&mut header_json_file)?;
+                serde_json::to_writer(&mut header_json_file, &header_chunk)
+                    .context("Failed to write header json file")?;
+
+                // Copy the header json to the final location
+                let header_json_path = file_data_folder.join("header.json");
+                std::fs::rename(header_json_tmp_path, header_json_path)?;
             }
-            FilePartId::Part(part_index) => {
-                let filename = format!("{}.bin", part_index);
+            Chunk::Data(data_chunk) => {
+                let filename = format!("{}.bin", data_chunk.part);
 
                 let part_path = file_data_folder.join(filename);
                 let mut part_file = File::create(part_path)
                     .context("Failed to create part file in destination folder")?;
 
-                part_file.write_all(&chunk.data)?;
+                part_file.write_all(&data_chunk.data)?;
             }
         }
 
-        self.control_msg_queue.push(ControlMessage::ConfirmPart {
-            file_id: chunk.file_id,
-            part_index: chunk.part,
-        });
+        self.control_msg_queue
+            .push(ControlMessage::ConfirmPart(ConfirmPart {
+                file_id,
+                part_index,
+            }));
 
         Ok(())
     }
@@ -163,7 +171,7 @@ fn is_file_data_finished(file_folder: &Path) -> anyhow::Result<bool> {
         return Ok(false);
     }
 
-    let header = FileHeaderData::deserialize_from_json_stream(File::open(header_json_path)?)?;
+    let header: HeaderChunk = serde_json::from_reader(File::open(header_json_path)?)?;
 
     for part_index in 0..header.part_count {
         let filename = format!("{}.bin", part_index);
@@ -183,7 +191,7 @@ fn write_finished_file_to_output_folder(
 ) -> anyhow::Result<()> {
     let data_folder = get_data_folder_path(file_folder);
     let header_json_path = data_folder.join("header.json");
-    let header = FileHeaderData::deserialize_from_json_stream(File::open(header_json_path)?)?;
+    let header: HeaderChunk = serde_json::from_reader(File::open(header_json_path)?)?;
 
     let filename = header.name;
 

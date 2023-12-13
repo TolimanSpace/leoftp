@@ -5,7 +5,7 @@ use std::io::Cursor;
 use common::{
     binary_serialize::BinarySerialize,
     chunks::Chunk,
-    transport_packet::{parse_transport_packet_stream, TransportPacket},
+    transport_packet::{parse_transport_packet_stream, TransportPacket, TransportPacketData},
     validity::ValidityCheck,
 };
 use libfuzzer_sys::{arbitrary::Arbitrary, fuzz_target};
@@ -112,13 +112,13 @@ fn corrupt_buffer(buf: &mut Vec<u8>, corruption: &CorruptionKind) {
 }
 
 #[derive(Clone, Debug, Arbitrary)]
-struct ChunkWithCorruption {
-    chunk: Chunk,
+struct PacketWithCorruption {
+    packet: TransportPacketData,
     corruption: CorruptionKind,
 }
 
-struct ChunkSerialized {
-    chunk: Chunk,
+struct PacketSerialized {
+    packet: TransportPacketData,
     bytes_corrupt: Vec<u8>,
     bytes_uncorrupt: Vec<u8>,
 }
@@ -130,19 +130,20 @@ struct ChunkSerialized {
 // 3. Deserialize the stream
 // 4. Compare the array of deserialize chunks with the array of chunks that were not corrupted
 
-fuzz_target!(|data: Vec<ChunkWithCorruption>| {
+fuzz_target!(|data: Vec<PacketWithCorruption>| {
     // Filter invalid chunks
-    let data: Vec<ChunkWithCorruption> = data.into_iter().filter(|c| c.chunk.is_valid()).collect();
+    let data: Vec<PacketWithCorruption> =
+        data.into_iter().filter(|c| c.packet.is_valid()).collect();
 
     // Serialize
     let serialized = data
         .iter()
         .cloned()
-        .map(|ChunkWithCorruption { chunk, corruption }| {
-            let chunk_cloned = chunk.clone();
+        .map(|PacketWithCorruption { packet, corruption }| {
+            let chunk_cloned = packet.clone();
 
             // As a transport packet
-            let transport_packet = TransportPacket::new(chunk);
+            let transport_packet = TransportPacket::new(packet);
 
             // Serialize
             let mut bytes = Vec::new();
@@ -152,8 +153,8 @@ fuzz_target!(|data: Vec<ChunkWithCorruption>| {
             let mut bytes_corrupt = bytes.clone();
             corrupt_buffer(&mut bytes_corrupt, &corruption);
 
-            ChunkSerialized {
-                chunk: chunk_cloned,
+            PacketSerialized {
+                packet: chunk_cloned,
                 bytes_corrupt,
                 bytes_uncorrupt: bytes,
             }
@@ -169,7 +170,7 @@ fuzz_target!(|data: Vec<ChunkWithCorruption>| {
     }
 
     // Scan over the resulting stream, finding what's expected to be uncorrupt and what isn't, to assert for the result
-    let mut expected_result_chunks = Vec::<Chunk>::new();
+    let mut expected_result_chunks = Vec::new();
     let mut prev_corrupt = false;
     let mut prev_eats_into_next = false;
     for (item, pos) in serialized.iter().zip(chunk_start_positions) {
@@ -199,7 +200,7 @@ fuzz_target!(|data: Vec<ChunkWithCorruption>| {
         let uncorrtupt = uncorrupt_forwards || uncorrupt_backwards;
 
         if uncorrtupt {
-            expected_result_chunks.push(item.chunk.clone());
+            expected_result_chunks.push(item.packet.clone());
         }
 
         if uncorrupt_forwards && item.bytes_corrupt.len() < uncorrupt_buf.len() {
@@ -211,7 +212,7 @@ fuzz_target!(|data: Vec<ChunkWithCorruption>| {
 
     // Deserialize
     let mut cursor = Cursor::new(final_stream);
-    let mut result_chunks = Vec::<Chunk>::new();
+    let mut result_chunks = Vec::new();
     for chunk in parse_transport_packet_stream(&mut cursor) {
         result_chunks.push(chunk.unwrap());
     }
@@ -230,7 +231,7 @@ fuzz_target!(|data: Vec<ChunkWithCorruption>| {
 
     let chunks = data
         .iter()
-        .map(|ChunkWithCorruption { chunk, .. }| chunk)
+        .map(|PacketWithCorruption { packet, .. }| packet)
         .collect::<Vec<_>>();
 
     // Then, check that every chunk in the result is part of the original input

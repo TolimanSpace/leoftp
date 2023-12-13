@@ -4,8 +4,16 @@ use std::io::{Cursor, Seek, SeekFrom};
 
 use common::{binary_serialize::BinarySerialize, control::ControlMessage, validity::ValidityCheck};
 use libfuzzer_sys::fuzz_target;
+use std::fmt::Debug;
 
 fuzz_target!(|data: ControlMessage| {
+    match data {
+        ControlMessage::ConfirmPart(confirm_part) => check_message(confirm_part),
+        ControlMessage::DeleteFile(delete_file) => check_message(delete_file),
+    }
+});
+
+fn check_message<T: BinarySerialize + ValidityCheck + PartialEq + Debug>(data: T) {
     if !data.is_valid() {
         return;
     }
@@ -17,7 +25,7 @@ fuzz_target!(|data: ControlMessage| {
     assert_eq!(data.length_when_serialized(), stream.position() as u32);
 
     stream.seek(SeekFrom::Start(0)).unwrap();
-    let deserialized = ControlMessage::deserialize_from_stream(&mut stream).unwrap();
+    let deserialized = T::deserialize_from_stream(&mut stream).unwrap();
 
     assert_eq!(data, deserialized);
-});
+}

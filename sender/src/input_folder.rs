@@ -54,7 +54,7 @@ pub fn spawn_file_poller(
 
             let rename_result = std::fs::rename(&path, &pending_path);
             if rename_result.is_err() {
-                println!("Failed to move file to pending folder: {:?}", rename_result);
+                tracing::error!("Failed to move file to pending folder: {:?}", rename_result);
                 continue;
             }
 

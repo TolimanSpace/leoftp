@@ -7,8 +7,8 @@ use std::{
 use anyhow::{bail, Context};
 use common::{
     binary_serialize::BinarySerialize,
-    chunks::Chunk,
-    header::{FileHeaderData, FilePartId},
+    chunks::{Chunk, DataChunk, HeaderChunk},
+    header::FilePartId,
 };
 
 use crate::FILE_PART_SIZE;
@@ -17,7 +17,7 @@ use crate::FILE_PART_SIZE;
 /// A file that's ready for sending
 pub struct ReadyFile {
     pub folder_path: PathBuf,
-    pub header: FileHeaderData,
+    pub header: HeaderChunk,
     pub unsent_parts: Vec<FilePartId>,
 }
 
@@ -54,7 +54,7 @@ pub fn parse_ready_folder(path: PathBuf) -> anyhow::Result<ReadyFile> {
     }
 
     // Then, parse the metadata
-    let header = FileHeaderData::deserialize_from_stream(&mut File::open(header_path)?)?;
+    let header = HeaderChunk::deserialize_from_stream(&mut File::open(header_path)?)?;
 
     // Then, parse the unsent parts
     let mut unsent_parts = Vec::new();
@@ -77,7 +77,7 @@ pub fn parse_ready_folder(path: PathBuf) -> anyhow::Result<ReadyFile> {
 pub fn write_ready_file_folder(
     destination_path: &Path,
     source_file: &Path,
-    header: FileHeaderData,
+    header: HeaderChunk,
 ) -> anyhow::Result<()> {
     // Make sure the destination folder exists
     fs::create_dir_all(&destination_path).context("Failed to create destination folder")?;
@@ -88,11 +88,12 @@ pub fn write_ready_file_folder(
         File::create(&header_path).context("Failed to create header file in destination folder")?;
     header.serialize_to_stream(&mut header_file)?;
 
-    // Write header json
+    // Write header json, for easier debugging
     let header_json_path = destination_path.join("header.json");
     let mut header_json_file = File::create(&header_json_path)
         .context("Failed to create header json file in destination folder")?;
-    header.serialize_to_json_stream(&mut header_json_file)?;
+    serde_json::to_writer(&mut header_json_file, &header)
+        .context("Failed to write header json file")?;
 
     // Write unsent parts
     let unsent_parts_path = destination_path.join("unsent-parts");
@@ -126,10 +127,8 @@ impl ReadyFile {
         let data = match part {
             FilePartId::Header => {
                 let mut file = File::open(self.folder_path.join("header"))?;
-                let mut data = Vec::new();
-                file.read_to_end(&mut data)?;
-
-                data
+                let header = HeaderChunk::deserialize_from_stream(&mut file)?;
+                Chunk::Header(header)
             }
             FilePartId::Part(i) => {
                 let mut file = File::open(self.folder_path.join("file"))?;
@@ -139,15 +138,21 @@ impl ReadyFile {
                 let byte_count = file.read(&mut data)?;
                 data.truncate(byte_count);
 
-                data
+                let data_chunk = DataChunk {
+                    file_id: self.header.id,
+                    part: i,
+                    data,
+                };
+
+                Chunk::Data(data_chunk)
             }
         };
 
-        Ok(Chunk {
-            file_id: self.header.id,
-            part,
-            data,
-        })
+        Ok(data)
+    }
+
+    pub fn still_exists_on_disk(&self) -> bool {
+        self.folder_path.exists()
     }
 }
 

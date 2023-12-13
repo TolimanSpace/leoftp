@@ -85,22 +85,20 @@ impl SenderLoopHandler {
             };
 
             match confirmation {
-                ControlMessage::ConfirmPart {
-                    file_id,
-                    part_index,
-                } => {
-                    let process_result = self.folder.process_confirmation(file_id, part_index);
+                ControlMessage::ConfirmPart(confirm) => {
+                    let process_result = self
+                        .folder
+                        .process_confirmation(confirm.file_id, confirm.part_index);
                     if let Err(err) = process_result {
-                        println!("Failed to process confirmation: {:?}", err);
+                        tracing::debug!("Failed to process confirmation: {:?}", err);
                     }
                 }
-                ControlMessage::DeleteFile { file_id } => {
-                    let delete_result = self.folder.delete_folder(file_id);
+                ControlMessage::DeleteFile(delete) => {
+                    let delete_result = self.folder.delete_folder(delete.file_id);
                     if let Err(err) = delete_result {
-                        println!("Failed to delete folder: {:?}", err);
+                        tracing::debug!("Failed to delete folder: {:?}", err);
                     }
                 }
-                ControlMessage::Continue => {}
             }
         }
 
@@ -123,9 +121,10 @@ impl SenderLoopHandler {
             let header = match header {
                 Ok(header) => header,
                 Err(err) => {
-                    println!(
+                    tracing::debug!(
                         "Failed to generate file header.\nFile: {:?}\nErr: {:?}",
-                        new_file, err
+                        new_file,
+                        err
                     );
                     continue;
                 }
@@ -135,7 +134,7 @@ impl SenderLoopHandler {
 
             let write_result = write_ready_file_folder(&path, &new_file, header);
             if let Err(err) = write_result {
-                println!("Failed to write ready file folder: {:?}", err);
+                tracing::debug!("Failed to write ready file folder: {:?}", err);
                 continue;
             }
 
@@ -159,7 +158,7 @@ impl SenderLoopHandler {
                 let ready_file = match parse_ready_folder(path) {
                     Ok(ready_file) => ready_file,
                     Err(err) => {
-                        println!("Failed to parse ready folder: {:?}", err);
+                        tracing::error!("Failed to parse ready folder for new folder: {:?}", err);
                         continue;
                     }
                 };
@@ -181,13 +180,20 @@ impl SenderLoopHandler {
             sort_packet_locations_by_importance(&mut packet_locations);
 
             for packet_location in packet_locations {
+                if !packet_location.file.still_exists_on_disk() {
+                    tracing::error!(
+                        "New file {} disappeared from disk before being fully sent",
+                        packet_location.file.header.id
+                    );
+                }
+
                 let chunk = match packet_location
                     .file
                     .get_unsent_part_as_chunk(packet_location.part_id)
                 {
                     Ok(chunk) => chunk,
                     Err(err) => {
-                        println!("Failed to get unsent part as chunk: {:?}", err);
+                        tracing::error!("Failed to get unsent part as chunk: {:?}", err);
                         continue;
                     }
                 };
@@ -212,7 +218,7 @@ impl SenderLoopHandler {
             let old_folders = match self.folder.get_all_folders() {
                 Ok(folders) => folders,
                 Err(err) => {
-                    println!("Failed to get ready folders: {:?}", err);
+                    tracing::error!("Failed to get ready folders: {:?}", err);
 
                     // Wait 1 second to not spam the error
                     std::thread::sleep(std::time::Duration::from_secs(1));
@@ -227,7 +233,7 @@ impl SenderLoopHandler {
                 let ready_file = match parse_ready_folder(folder) {
                     Ok(ready_file) => ready_file,
                     Err(err) => {
-                        println!("Failed to parse ready folder: {:?}", err);
+                        tracing::error!("Failed to parse ready folder for old folder: {:?}", err);
                         continue;
                     }
                 };
@@ -252,7 +258,7 @@ impl SenderLoopHandler {
                 self.process_control_events()?;
 
                 // Process new files between chunk sends
-                self.process_new_files()?;
+                self.process_and_send_new_files()?;
 
                 // Wait 100ms to not abuse the cpu
                 std::thread::sleep(std::time::Duration::from_millis(100));
@@ -260,13 +266,17 @@ impl SenderLoopHandler {
                 sort_packet_locations_by_importance(&mut packet_locations);
 
                 for packet_location in packet_locations {
+                    if !packet_location.file.still_exists_on_disk() {
+                        continue;
+                    }
+
                     let chunk = match packet_location
                         .file
                         .get_unsent_part_as_chunk(packet_location.part_id)
                     {
                         Ok(chunk) => chunk,
                         Err(err) => {
-                            println!("Failed to get unsent part as chunk: {:?}", err);
+                            tracing::error!("Failed to get unsent part as chunk: {:?}", err);
                             continue;
                         }
                     };
@@ -280,7 +290,7 @@ impl SenderLoopHandler {
                     self.process_control_events()?;
 
                     // Process new files between chunk sends
-                    self.process_new_files()?;
+                    self.process_and_send_new_files()?;
                 }
             }
         }

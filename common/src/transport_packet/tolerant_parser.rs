@@ -2,9 +2,11 @@ use std::hash::Hasher;
 use std::io::{self, Read};
 
 use crate::binary_serialize::BinarySerialize;
+use crate::transport_packet::parse_data_from_type;
 use crate::transport_packet::scrambling::UnscramblingReader;
 use crate::transport_packet::substream::SubstreamReader;
 
+use super::TransportPacketData;
 use super::{checkpoint_stream::StreamWithCheckpoints, TransportPacket};
 
 pub fn debug_stream(stream: &mut StreamWithCheckpoints<impl Read>, len: usize) {
@@ -15,9 +17,9 @@ pub fn debug_stream(stream: &mut StreamWithCheckpoints<impl Read>, len: usize) {
     println!("Stream: {:?}", chars);
 }
 
-pub fn parse_transport_packet_stream<T: BinarySerialize>(
+pub fn parse_transport_packet_stream(
     stream: impl Read,
-) -> impl Iterator<Item = io::Result<T>> {
+) -> impl Iterator<Item = io::Result<TransportPacketData>> {
     let mut stream = StreamWithCheckpoints::new(stream);
 
     let mut errored = false;
@@ -40,7 +42,7 @@ pub fn parse_transport_packet_stream<T: BinarySerialize>(
 
             stream.checkpoint();
 
-            let next_packet = parse_next_packet::<T>(&mut stream);
+            let next_packet = parse_next_packet(&mut stream);
             match next_packet {
                 Ok(Ok(packet)) => {
                     stream.checkpoint();
@@ -119,9 +121,9 @@ fn index_of_signature(buf: &[u8]) -> Option<usize> {
 
 /// Returns a dual error type, where the outer error is a packet parsing error,
 /// and the inner error is a data deserialization error.
-fn parse_next_packet<T: BinarySerialize>(
+fn parse_next_packet(
     mut stream: &mut StreamWithCheckpoints<impl Read>,
-) -> io::Result<io::Result<T>> {
+) -> io::Result<io::Result<TransportPacketData>> {
     // Parse signature
     let mut signature_buf = [0u8; 4];
     stream.read_exact(&mut signature_buf)?;
@@ -129,18 +131,22 @@ fn parse_next_packet<T: BinarySerialize>(
 
     stream.checkpoint();
 
+    let mut type_buf = [0u8; 1];
+    stream.read_exact(&mut type_buf)?;
+    let type_ = type_buf[0];
+
     // Parse length
     let mut length_buf = [0u8; 4];
     stream.read_exact(&mut length_buf)?;
     let length = u32::from_le_bytes(length_buf);
 
-    if length as usize > TransportPacket::<T>::MAX_DATA_LEN {
+    if length as usize > TransportPacket::MAX_DATA_LEN {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
                 "Transport packet length {} exceeds maximum {}",
                 length,
-                TransportPacket::<T>::MAX_DATA_LEN
+                TransportPacket::MAX_DATA_LEN
             ),
         ));
     }
@@ -177,7 +183,7 @@ fn parse_next_packet<T: BinarySerialize>(
     stream.rollback();
 
     let mut substream = SubstreamReader::new(UnscramblingReader::new(&mut stream), length as usize);
-    let parsed = T::deserialize_from_stream(&mut substream);
+    let parsed = parse_data_from_type(type_, &mut substream);
     let reached_end = substream.reached_end();
 
     // Skip hash value
@@ -202,11 +208,11 @@ fn parse_next_packet<T: BinarySerialize>(
 mod tests {
     use super::*;
     use crate::binary_serialize::BinarySerialize;
-    use crate::chunks::Chunk;
+    use crate::chunks::{Chunk, DataChunk};
     use crate::header::FilePartId;
     use crate::transport_packet::TransportPacket;
 
-    fn make_dummy_packets_list(count: usize) -> Vec<TransportPacket<Chunk>> {
+    fn make_dummy_packets_list(count: usize) -> Vec<TransportPacket> {
         let mut packets = Vec::new();
 
         for i in 0..count {
@@ -215,11 +221,11 @@ mod tests {
                 data.push(i as u8);
             }
 
-            let packet = TransportPacket::new(Chunk {
+            let packet = TransportPacket::new(TransportPacketData::DataChunk(DataChunk {
                 file_id: Default::default(),
-                part: FilePartId::Part(i as u32),
+                part: i as u32,
                 data,
-            });
+            }));
 
             packets.push(packet);
         }
@@ -237,10 +243,9 @@ mod tests {
         }
 
         let mut stream = std::io::Cursor::new(stream);
-        let mut parsed_packets = parse_transport_packet_stream::<Chunk>(&mut stream);
+        let mut parsed_packets = parse_transport_packet_stream(&mut stream);
 
         for packet in packets {
-            println!("Read packet, {}", packet.data.data.data.len());
             let parsed_packet = parsed_packets.next().unwrap().unwrap();
             assert_eq!(parsed_packet, packet.data());
         }
@@ -259,7 +264,7 @@ mod tests {
         }
 
         let mut stream = std::io::Cursor::new(stream);
-        let mut parsed_packets = parse_transport_packet_stream::<Chunk>(&mut stream);
+        let mut parsed_packets = parse_transport_packet_stream(&mut stream);
 
         for packet in packets {
             let parsed_packet = parsed_packets.next().unwrap().unwrap();
@@ -286,7 +291,7 @@ mod tests {
         }
 
         let mut stream = std::io::Cursor::new(stream);
-        let mut parsed_packets = parse_transport_packet_stream::<Chunk>(&mut stream);
+        let mut parsed_packets = parse_transport_packet_stream(&mut stream);
 
         for (i, packet) in packets.into_iter().enumerate() {
             if i % 2 == 0 {

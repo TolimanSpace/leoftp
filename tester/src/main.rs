@@ -3,6 +3,11 @@ use std::{path::PathBuf, sync::Arc, thread, time::Duration};
 use common::control::ControlMessage;
 
 pub fn main() {
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .compact()
+        .init();
+
     let base_folder = PathBuf::from("./testdata");
 
     let snd_folder = base_folder.join("snd");
@@ -47,7 +52,6 @@ pub fn main() {
         for control in rcv_file_server.iter_control_messages() {
             snd_file_server.send_control_msg(control);
         }
-        snd_file_server.send_control_msg(ControlMessage::Continue);
 
         thread::sleep(Duration::from_secs(1));
     }
