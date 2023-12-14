@@ -22,6 +22,46 @@ pub enum TransportPacketData {
     DeleteFile(crate::control::DeleteFile),             // 129
 }
 
+impl TransportPacketData {
+    pub fn as_chunk(self) -> Option<Chunk> {
+        match self {
+            TransportPacketData::HeaderChunk(header_chunk) => Some(Chunk::Header(header_chunk)),
+            TransportPacketData::DataChunk(data_chunk) => Some(Chunk::Data(data_chunk)),
+            _ => None,
+        }
+    }
+
+    pub fn as_control_message(self) -> Option<crate::control::ControlMessage> {
+        match self {
+            TransportPacketData::AcknowledgementPacket(ack) => {
+                Some(crate::control::ControlMessage::ConfirmPart(ack))
+            }
+            TransportPacketData::DeleteFile(delete_file) => {
+                Some(crate::control::ControlMessage::DeleteFile(delete_file))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn from_chunk(chunk: Chunk) -> Self {
+        match chunk {
+            Chunk::Header(header_chunk) => TransportPacketData::HeaderChunk(header_chunk),
+            Chunk::Data(data_chunk) => TransportPacketData::DataChunk(data_chunk),
+        }
+    }
+
+    pub fn from_control_message(control_message: crate::control::ControlMessage) -> Self {
+        match control_message {
+            crate::control::ControlMessage::ConfirmPart(ack) => {
+                TransportPacketData::AcknowledgementPacket(ack)
+            }
+            crate::control::ControlMessage::DeleteFile(delete_file) => {
+                TransportPacketData::DeleteFile(delete_file)
+            }
+        }
+    }
+}
+
 pub const CONST_PACKET_SIGNATURE: &[u8] = b"LFTP";
 
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]

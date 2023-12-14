@@ -8,7 +8,7 @@ use anyhow::{bail, Context};
 use common::{
     binary_serialize::BinarySerialize,
     chunks::{Chunk, DataChunk, HeaderChunk},
-    header::FilePartId,
+    file_part_id::FilePartId,
 };
 
 #[derive(Clone, Debug)]

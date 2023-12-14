@@ -2,6 +2,7 @@ use std::{
     fs::File,
     io,
     path::{Path, PathBuf},
+    thread::JoinHandle,
 };
 
 use anyhow::Context;
@@ -9,7 +10,7 @@ use chrono::{DateTime, Utc};
 use common::{
     chunks::{Chunk, HeaderChunk},
     control::ControlMessage,
-    header::FilePartId,
+    file_part_id::FilePartId,
 };
 use crossbeam_channel::{Receiver, Sender};
 use uuid::Uuid;
@@ -21,7 +22,7 @@ use self::sender_loop::spawn_chunk_sender;
 mod sender_loop;
 
 pub struct ReadyFolderThreads {
-    // TODO: Join handles
+    join_handle: JoinHandle<()>,
 }
 
 impl ReadyFolderThreads {
@@ -37,9 +38,13 @@ impl ReadyFolderThreads {
             file_part_size,
         };
 
-        spawn_chunk_sender(handler, new_file_rcv, chunks_snd, confirmation_rcv);
+        let join_handle = spawn_chunk_sender(handler, new_file_rcv, chunks_snd, confirmation_rcv);
 
-        ReadyFolderThreads {}
+        ReadyFolderThreads { join_handle }
+    }
+
+    pub fn join(self) {
+        self.join_handle.join().unwrap()
     }
 }
 

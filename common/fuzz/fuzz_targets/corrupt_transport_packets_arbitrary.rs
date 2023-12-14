@@ -4,8 +4,6 @@ use common::{chunks::Chunk, transport_packet::parse_transport_packet_stream};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
-    std::thread::sleep(std::time::Duration::from_millis(10000));
-
     let mut cursor = std::io::Cursor::new(data);
     let mut result_chunks = Vec::new();
     for chunk in parse_transport_packet_stream(&mut cursor) {

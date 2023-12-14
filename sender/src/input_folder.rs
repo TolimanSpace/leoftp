@@ -1,9 +1,9 @@
-use std::{io, path::PathBuf};
+use std::{io, path::PathBuf, thread::JoinHandle};
 
 use crossbeam_channel::Sender;
 
 pub struct InputFolderThreads {
-    // TODO: Store join handles
+    join_handle: JoinHandle<()>,
 }
 
 impl InputFolderThreads {
@@ -12,11 +12,15 @@ impl InputFolderThreads {
         pending_folder: PathBuf,
         new_file_snd: Sender<PathBuf>,
     ) -> io::Result<Self> {
-        spawn_file_poller(input_folder.clone(), pending_folder, new_file_snd)?;
+        let join_handle = spawn_file_poller(input_folder.clone(), pending_folder, new_file_snd)?;
 
-        let folder = InputFolderThreads {};
+        let folder = InputFolderThreads { join_handle };
 
         Ok(folder)
+    }
+
+    pub fn join(self) {
+        self.join_handle.join().unwrap()
     }
 }
 
@@ -24,7 +28,7 @@ pub fn spawn_file_poller(
     input_folder: PathBuf,
     pending_folder: PathBuf,
     new_file_snd: Sender<PathBuf>,
-) -> io::Result<()> {
+) -> io::Result<JoinHandle<()>> {
     // Add all the files that are already in the pending folder to the queue
     for entry in std::fs::read_dir(&pending_folder)? {
         let entry = entry?;
@@ -36,7 +40,7 @@ pub fn spawn_file_poller(
 
     // Spawn a thread that polls the new folder, and moves each file there into the pending folder and
     // notifies the pending queue
-    std::thread::spawn(move || loop {
+    let join = std::thread::spawn(move || loop {
         // Find all the new foles in the new folder
         let mut new_files = Vec::new();
         for entry in std::fs::read_dir(&input_folder).unwrap() {
@@ -68,5 +72,5 @@ pub fn spawn_file_poller(
         std::thread::sleep(std::time::Duration::from_millis(100));
     });
 
-    Ok(())
+    Ok(join)
 }

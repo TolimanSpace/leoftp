@@ -1,7 +1,7 @@
 #![allow(clippy::comparison_chain)]
-use std::path::PathBuf;
+use std::{path::PathBuf, thread::JoinHandle};
 
-use common::{chunks::Chunk, control::ControlMessage, header::FilePartId};
+use common::{chunks::Chunk, control::ControlMessage, file_part_id::FilePartId};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
 
 use crate::ready_file::{parse_ready_folder, write_ready_file_folder, ReadyFile};
@@ -11,6 +11,7 @@ use super::ReadyFolderHandler;
 #[derive(Debug)]
 struct LoopKilled;
 
+#[derive(Debug)]
 struct PacketLocation<'a> {
     file: &'a ReadyFile,
     part_id: FilePartId,
@@ -302,9 +303,9 @@ pub fn spawn_chunk_sender(
     new_file_rcv: Receiver<PathBuf>,
     chunks_snd: Sender<Chunk>,
     confirmation_rcv: Receiver<ControlMessage>,
-) {
+) -> JoinHandle<()> {
     std::thread::spawn(move || {
         let handler = SenderLoopHandler::new(handler, new_file_rcv, chunks_snd, confirmation_rcv);
         handler.run_process_loop().ok();
-    });
+    })
 }

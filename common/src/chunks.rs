@@ -3,7 +3,7 @@ use std::io;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{binary_serialize::BinarySerialize, header::FilePartId, validity::ValidityCheck};
+use crate::{binary_serialize::BinarySerialize, file_part_id::FilePartId, validity::ValidityCheck};
 
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 #[derive(Clone, Debug, PartialEq)]
@@ -24,6 +24,21 @@ impl Chunk {
         match self {
             Chunk::Data(data_chunk) => FilePartId::Part(data_chunk.part),
             Chunk::Header(_) => FilePartId::Header,
+        }
+    }
+}
+
+impl std::fmt::Display for Chunk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Chunk::Data(data_chunk) => write!(
+                f,
+                "Chunk {{ id: {}, part: {} }}",
+                data_chunk.file_id, data_chunk.part,
+            ),
+            Chunk::Header(header_chunk) => {
+                write!(f, "Chunk {{ id: {}, part: header }}", header_chunk.id,)
+            }
         }
     }
 }
@@ -126,6 +141,7 @@ impl BinarySerialize for HeaderChunk {
         writer.write_all(&self.date.to_le_bytes())?;
         writer.write_all(&self.part_count.to_le_bytes())?;
         writer.write_all(&self.size.to_le_bytes())?;
+        writer.write_all(&self.file_part_size.to_le_bytes())?;
 
         Ok(())
     }
@@ -137,6 +153,7 @@ impl BinarySerialize for HeaderChunk {
         + 8 // date
         + 4 // part_count
         + 8 // size
+        + 4 // file_part_size
     }
 
     fn deserialize_from_stream(reader: &mut impl std::io::Read) -> io::Result<Self> {

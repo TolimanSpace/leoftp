@@ -1,7 +1,11 @@
-use std::{io, path::PathBuf};
+use std::{
+    io,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
 use common::{chunks::Chunk, control::ControlMessage};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, RecvError, SendError, Sender};
 use input_folder::InputFolderThreads;
 use ready_folder::ReadyFolderThreads;
 mod input_folder;
@@ -17,11 +21,15 @@ mod ready_folder;
 
 const DEFAULT_FILE_PART_SIZE: u32 = 1024 * 64; // 64kb
 
-/// The file server. It automatically has a queue of chunks to send, and a queue of confirmations to process.
-pub struct FileServer {
-    _input_folder: InputFolderThreads,
-    _ready_folder: ReadyFolderThreads,
+struct FileServerInner {
+    input_folder: InputFolderThreads,
+    ready_folder: ReadyFolderThreads,
+}
 
+/// The file server. It automatically has a queue of chunks to send, and a queue of confirmations to process.
+#[derive(Clone)]
+pub struct FileServer {
+    inner: Arc<Mutex<Option<FileServerInner>>>,
     chunks_rcv: Receiver<Chunk>,
     control_snd: Sender<ControlMessage>,
 }
@@ -51,25 +59,42 @@ impl FileServer {
         std::fs::create_dir_all(&ready_folder)?;
 
         Ok(FileServer {
-            _input_folder: InputFolderThreads::spawn(input_folder, pending_folder, new_file_snd)?,
-            _ready_folder: ReadyFolderThreads::spawn(
-                ready_folder,
-                new_file_rcv,
-                chunks_snd,
-                control_rcv,
-                file_part_size,
-            ),
+            inner: Arc::new(Mutex::new(Some(FileServerInner {
+                input_folder: InputFolderThreads::spawn(
+                    input_folder,
+                    pending_folder,
+                    new_file_snd,
+                )?,
+                ready_folder: ReadyFolderThreads::spawn(
+                    ready_folder,
+                    new_file_rcv,
+                    chunks_snd,
+                    control_rcv,
+                    file_part_size,
+                ),
+            }))),
 
             chunks_rcv,
             control_snd,
         })
     }
 
-    pub fn get_chunk(&self) -> Chunk {
-        self.chunks_rcv.recv().unwrap()
+    pub fn get_chunk(&self) -> Result<Chunk, RecvError> {
+        self.chunks_rcv.recv()
     }
 
-    pub fn send_control_msg(&self, control: ControlMessage) {
-        self.control_snd.send(control).unwrap();
+    pub fn send_control_msg(
+        &self,
+        control: ControlMessage,
+    ) -> Result<(), SendError<ControlMessage>> {
+        self.control_snd.send(control)
+    }
+
+    pub fn join(self) {
+        let inner = self.inner.lock().unwrap().take().unwrap();
+
+        // Then join the threads
+        inner.input_folder.join();
+        inner.ready_folder.join();
     }
 }

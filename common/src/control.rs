@@ -1,12 +1,31 @@
 use uuid::Uuid;
 
-use crate::{binary_serialize::BinarySerialize, header::FilePartId, validity::ValidityCheck};
+use crate::{binary_serialize::BinarySerialize, file_part_id::FilePartId, validity::ValidityCheck};
 
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ControlMessage {
     ConfirmPart(ConfirmPart),
     DeleteFile(DeleteFile),
+}
+
+impl std::fmt::Display for ControlMessage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ControlMessage::ConfirmPart(msg) => write!(
+                f,
+                "ControlMessage::ConfirmPart {{ file_id: {}, part_index: {} }}",
+                msg.file_id, msg.part_index,
+            ),
+            ControlMessage::DeleteFile(msg) => {
+                write!(
+                    f,
+                    "ControlMessage::DeleteFile {{ file_id: {} }}",
+                    msg.file_id,
+                )
+            }
+        }
+    }
 }
 
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]

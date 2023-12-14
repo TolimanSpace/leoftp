@@ -69,5 +69,14 @@ impl<'de> Deserialize<'de> for FilePartId {
     }
 }
 
+impl std::fmt::Display for FilePartId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FilePartId::Header => write!(f, "header"),
+            FilePartId::Part(i) => write!(f, "{}", i),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Hash(pub u64);

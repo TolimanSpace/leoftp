@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 
 # Function to run cargo fuzz with the given file (without extension)
 run_fuzz() {
