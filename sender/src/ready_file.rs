@@ -78,17 +78,17 @@ pub fn write_ready_file_folder(
     header: HeaderChunk,
 ) -> anyhow::Result<()> {
     // Make sure the destination folder exists
-    fs::create_dir_all(&destination_path).context("Failed to create destination folder")?;
+    fs::create_dir_all(destination_path).context("Failed to create destination folder")?;
 
     // Write header
     let header_path = destination_path.join("header");
     let mut header_file =
-        File::create(&header_path).context("Failed to create header file in destination folder")?;
+        File::create(header_path).context("Failed to create header file in destination folder")?;
     header.serialize_to_stream(&mut header_file)?;
 
     // Write header json, for easier debugging
     let header_json_path = destination_path.join("header.json");
-    let mut header_json_file = File::create(&header_json_path)
+    let mut header_json_file = File::create(header_json_path)
         .context("Failed to create header json file in destination folder")?;
     serde_json::to_writer(&mut header_json_file, &header)
         .context("Failed to write header json file")?;
@@ -101,7 +101,7 @@ pub fn write_ready_file_folder(
     // Write the header part
     let header_part = FilePartId::Header;
     let header_part_path = unsent_parts_path.join(header_part.as_string());
-    File::create(&header_part_path)
+    File::create(header_part_path)
         .context("Failed to create unsent part file in destination folder")?;
 
     // Write the body parts

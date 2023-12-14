@@ -16,7 +16,7 @@ struct PacketLocation<'a> {
     part_id: FilePartId,
 }
 
-fn sort_packet_locations_by_importance(packet_locations: &mut Vec<PacketLocation>) {
+fn sort_packet_locations_by_importance(packet_locations: &mut [PacketLocation]) {
     // Sort priority:
     // Any header parts are higher priority than data parts `.part_id == FilePartId::Header`
     // Sort by dates, so older files always get higher precedence `.file.header.date`
