@@ -4,29 +4,96 @@ use std::{
     time::Duration,
 };
 
+const PIPE_BUF_SIZE: usize = 4096;
+#[derive(Debug, Clone)]
+struct PipeDataBuf {
+    data: [u8; PIPE_BUF_SIZE],
+    len: usize,
+}
+
+impl PipeDataBuf {
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn as_slice(&self) -> &[u8] {
+        &self.data[..self.len]
+    }
+
+    fn push(&mut self, val: u8) {
+        self.data[self.len] = val;
+        self.len += 1;
+    }
+
+    fn is_full(&self) -> bool {
+        self.len == self.data.len()
+    }
+
+    fn clear(&mut self) {
+        self.len = 0;
+    }
+}
+
+impl Default for PipeDataBuf {
+    fn default() -> Self {
+        Self {
+            data: [0u8; PIPE_BUF_SIZE],
+            len: 0,
+        }
+    }
+}
+
+impl IntoIterator for PipeDataBuf {
+    type Item = u8;
+    type IntoIter = PipeDataIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        PipeDataIter { buf: self, pos: 0 }
+    }
+}
+
+struct PipeDataIter {
+    buf: PipeDataBuf,
+    pos: usize,
+}
+
+impl Iterator for PipeDataIter {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos < self.buf.len {
+            let val = self.buf.data[self.pos];
+            self.pos += 1;
+            Some(val)
+        } else {
+            None
+        }
+    }
+}
+
 use rand::Rng;
-struct BytePipeSnd {
-    snd: crossbeam_channel::Sender<Vec<u8>>,
+pub struct BytePipeSnd {
+    snd: crossbeam_channel::Sender<PipeDataBuf>,
     kill_signal: Arc<AtomicBool>,
+
+    current_buf: PipeDataBuf,
 }
 
 struct BytePipeRcvShared {
-    rcv: crossbeam_channel::Receiver<Vec<u8>>,
+    rcv: crossbeam_channel::Receiver<PipeDataBuf>,
     kill_signal: Arc<AtomicBool>,
 }
 
 struct BytePipeRcv {
     shared: BytePipeRcvShared,
 
-    last_buf: Vec<u8>,
-    last_buf_pos: usize,
+    last_buf: PipeDataIter,
 }
 
 struct BytePipeCorruptRcv {
     shared: BytePipeRcvShared,
 
-    last_buf: Vec<u8>,
-    last_buf_pos: usize,
+    last_buf: PipeDataIter,
 
     corrupt_byte_chance: f32,
     skip_bytes_chance: f32,
@@ -38,6 +105,27 @@ impl BytePipeSnd {
     fn is_killed(&self) -> bool {
         self.kill_signal.load(std::sync::atomic::Ordering::Relaxed)
     }
+
+    fn send_buf(&mut self) -> bool {
+        loop {
+            if self.is_killed() {
+                return false;
+            }
+
+            let timeout = Duration::from_millis(100);
+            let result = self.snd.send_timeout(self.current_buf.clone(), timeout);
+
+            // If we got an error, it's either a safe timeout or a broken pipe
+            if let Err(err) = result {
+                if !err.is_timeout() {
+                    return false;
+                }
+            } else {
+                self.current_buf.clear();
+                return true;
+            }
+        }
+    }
 }
 
 impl std::io::Write for BytePipeSnd {
@@ -48,29 +136,18 @@ impl std::io::Write for BytePipeSnd {
             return Ok(0);
         }
 
-        let vecs = buf.chunks(256).into_iter().map(|chunk| chunk.to_vec());
+        loop {
+            while !self.current_buf.is_full() && written < buf.len() {
+                self.current_buf.push(buf[written]);
+                written += 1;
+            }
 
-        'sender: for mut vec in vecs {
-            let len = vec.len();
-            loop {
-                if self.is_killed() {
-                    return Ok(written);
-                }
+            if !self.current_buf.is_full() {
+                break;
+            }
 
-                let timeout = Duration::from_millis(100);
-                let result = self.snd.send_timeout(vec, timeout);
-
-                // If we got an error, it's either a safe timeout or a broken pipe
-                if let Err(err) = result {
-                    if !err.is_timeout() {
-                        break 'sender;
-                    }
-
-                    vec = err.into_inner();
-                } else {
-                    written += len;
-                    break;
-                }
+            if !self.send_buf() {
+                break;
             }
         }
 
@@ -78,6 +155,7 @@ impl std::io::Write for BytePipeSnd {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
+        self.send_buf();
         Ok(())
     }
 }
@@ -87,7 +165,7 @@ impl BytePipeRcvShared {
         self.kill_signal.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    fn get_next(&self) -> Option<Vec<u8>> {
+    fn get_next(&self) -> Option<PipeDataBuf> {
         loop {
             if self.is_killed() {
                 return None;
@@ -114,20 +192,17 @@ impl std::io::Read for BytePipeRcv {
 
         // If we still have space in the buffer, read a new buffer
         while buf_pos < buf.len() {
-            if self.last_buf_pos == self.last_buf.len() {
+            let Some(next) = self.last_buf.next() else {
                 if let Some(next_buf) = self.shared.get_next() {
-                    self.last_buf = next_buf;
+                    self.last_buf = next_buf.into_iter();
+                    continue;
                 } else {
                     break;
                 }
-                self.last_buf_pos = 0;
-            }
+            };
 
-            while self.last_buf_pos < self.last_buf.len() && buf_pos < buf.len() {
-                buf[buf_pos] = self.last_buf[self.last_buf_pos];
-                buf_pos += 1;
-                self.last_buf_pos += 1;
-            }
+            buf[buf_pos] = next;
+            buf_pos += 1;
         }
 
         Ok(buf_pos)
@@ -162,31 +237,28 @@ impl std::io::Read for BytePipeCorruptRcv {
 
         // If we still have space in the buffer, read a new buffer
         while buf_pos < buf.len() {
-            if self.last_buf_pos == self.last_buf.len() {
+            let Some(next) = self.last_buf.next() else {
                 if let Some(next_buf) = self.shared.get_next() {
-                    self.last_buf = next_buf;
+                    self.last_buf = next_buf.into_iter();
+                    continue;
                 } else {
                     break;
                 }
-                self.last_buf_pos = 0;
-            }
+            };
 
-            while self.last_buf_pos < self.last_buf.len() && buf_pos < buf.len() {
-                if self.remaining_bytes_skip > 0 {
-                    self.remaining_bytes_skip -= 1;
-                } else {
-                    let mut val = self.last_buf[self.last_buf_pos];
-                    if self.should_corrupt_byte() {
-                        val = rand::random::<u8>();
-                    }
-                    buf[buf_pos] = val;
-                    buf_pos += 1;
-
-                    if self.should_skip_bytes() {
-                        self.remaining_bytes_skip = self.byte_skip_dist();
-                    }
+            if self.remaining_bytes_skip > 0 {
+                self.remaining_bytes_skip -= 1;
+            } else {
+                let mut val = next;
+                if self.should_corrupt_byte() {
+                    val = rand::random::<u8>();
                 }
-                self.last_buf_pos += 1;
+                buf[buf_pos] = val;
+                buf_pos += 1;
+
+                if self.should_skip_bytes() {
+                    self.remaining_bytes_skip = self.byte_skip_dist();
+                }
             }
         }
 
@@ -200,11 +272,11 @@ pub fn make_pipe(kill_signal: Arc<AtomicBool>) -> (impl io::Write, impl io::Read
         BytePipeSnd {
             snd,
             kill_signal: kill_signal.clone(),
+            current_buf: Default::default(),
         },
         BytePipeRcv {
             shared: BytePipeRcvShared { rcv, kill_signal },
-            last_buf: Vec::new(),
-            last_buf_pos: 0,
+            last_buf: PipeDataBuf::default().into_iter(),
         },
     )
 }
@@ -221,11 +293,11 @@ pub fn make_corrupt_pipe(
         BytePipeSnd {
             snd,
             kill_signal: kill_signal.clone(),
+            current_buf: Default::default(),
         },
         BytePipeCorruptRcv {
             shared: BytePipeRcvShared { rcv, kill_signal },
-            last_buf: Vec::new(),
-            last_buf_pos: 0,
+            last_buf: PipeDataBuf::default().into_iter(),
 
             corrupt_byte_chance: corrupt_byte_chance / 2.0,
             skip_bytes_chance: corrupt_byte_chance / 2.0,
@@ -251,6 +323,8 @@ mod tests {
         snd.write_all(&data).unwrap();
         let data = vec![6];
         snd.write_all(&data).unwrap();
+
+        snd.flush().unwrap();
 
         let mut buf = vec![0u8; 3];
         rcv.read_exact(&mut buf).unwrap();

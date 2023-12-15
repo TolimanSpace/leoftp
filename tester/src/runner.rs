@@ -9,7 +9,7 @@ use common::{
     transport_packet::{parse_transport_packet_stream, TransportPacket, TransportPacketData},
 };
 
-use crate::byte_pipe::make_pipe;
+use crate::byte_pipe::make_corrupt_pipe;
 
 pub struct TestRunner {
     join_handle: JoinHandle<()>,
@@ -30,20 +30,24 @@ impl TestRunner {
         let rcv_finished_folder = rcv_folder.join("finished");
 
         // Spawn the sender and receiver
-        let snd_file_server =
-            sender::FileServer::spawn(snd_input_folder.clone(), snd_workdir_folder).unwrap();
+        let snd_file_server = sender::FileServer::spawn_with_part_size(
+            snd_input_folder.clone(),
+            snd_workdir_folder,
+            1048576,
+        )
+        .unwrap();
         let mut rcv_file_server =
             receiver::Reciever::new(rcv_pending_folder, rcv_finished_folder.clone()).unwrap();
 
         let kill_flag = Arc::new(AtomicBool::new(false));
 
-        let _corrupt_freq = 65536;
+        let corrupt_freq = 65536;
 
-        let (mut chunks_snd, chunks_rcv) = make_pipe(kill_flag.clone());
-        let (mut control_snd, control_rcv) = make_pipe(kill_flag.clone());
+        let (mut chunks_snd, chunks_rcv) = make_corrupt_pipe(corrupt_freq, kill_flag.clone());
+        let (mut control_snd, control_rcv) = make_corrupt_pipe(corrupt_freq, kill_flag.clone());
 
         let rcv_join = std::thread::spawn(move || {
-            let control_interval = 1000;
+            let control_interval = 50;
 
             let mut chunk_parse = parse_transport_packet_stream(chunks_rcv);
 
@@ -100,13 +104,20 @@ impl TestRunner {
         let join_handle = std::thread::spawn(move || {
             chunk_sender
                 .join()
-                .map_err(|e| tracing::error!("{:?}", e))
+                .map_err(|e| {
+                    tracing::error!("chunk sender thread: {:?}", e.downcast_ref::<String>())
+                })
                 .ok();
             control_receiver
                 .join()
-                .map_err(|e| tracing::error!("{:?}", e))
+                .map_err(|e| {
+                    tracing::error!("control rcv thread: {:?}", e.downcast_ref::<String>())
+                })
                 .ok();
-            rcv_join.join().map_err(|e| tracing::error!("{:?}", e)).ok();
+            rcv_join
+                .join()
+                .map_err(|e| tracing::error!("rcv join thread: {:?}", e.downcast_ref::<String>()))
+                .ok();
 
             snd_file_server.join();
 

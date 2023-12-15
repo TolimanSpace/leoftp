@@ -332,4 +332,30 @@ mod tests {
 
         assert_eq!(deserialized.data(), packet.data());
     }
+
+    #[test]
+    fn test_big_packet() {
+        // Make a packet with the length of 1048576, arbitrary numbers
+        let mut data = Vec::new();
+        for i in 0..1048576 {
+            data.push(i as u8);
+        }
+
+        let packet = TransportPacketData::DataChunk(DataChunk {
+            data,
+            file_id: Default::default(),
+            part: 12,
+        });
+
+        let packet = TransportPacket::new(packet);
+
+        let mut serialized = Vec::new();
+        packet.serialize_to_stream(&mut serialized).unwrap();
+        dbg!(&serialized);
+
+        let mut deserialized = std::io::Cursor::new(serialized);
+        let deserialized = TransportPacket::deserialize_from_stream(&mut deserialized).unwrap();
+
+        assert_eq!(deserialized.data(), packet.data());
+    }
 }

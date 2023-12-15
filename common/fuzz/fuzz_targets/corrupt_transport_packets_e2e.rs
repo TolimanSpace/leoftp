@@ -32,6 +32,11 @@ struct ByteRemoveRange {
     len: usize,
 }
 
+#[derive(Clone, Copy, Debug, Arbitrary)]
+struct InjectLftp {
+    pos: usize,
+}
+
 #[derive(Clone, Debug, Arbitrary)]
 enum CorruptionKind {
     NoCorruption1,
@@ -49,6 +54,7 @@ enum CorruptionKind {
     ByteRemove(ByteRemove),
     ByteRemoveStart(ByteRemoveRange),
     ByteRemoveEnd(ByteRemoveRange),
+    InjectLftp(InjectLftp),
 }
 
 fn corrupt_buffer(buf: &mut Vec<u8>, corruption: &CorruptionKind) {
@@ -107,6 +113,19 @@ fn corrupt_buffer(buf: &mut Vec<u8>, corruption: &CorruptionKind) {
             let len = *len % (buf.len() / 2);
             let buf_len = buf.len();
             buf.drain(buf_len - len..buf_len);
+        }
+        CorruptionKind::InjectLftp(InjectLftp { pos }) => {
+            if buf.len() < 5 {
+                return;
+            }
+
+            let max_pos = buf.len() - 4;
+            let pos = *pos % max_pos;
+
+            buf[pos] = b'L';
+            buf[pos + 1] = b'F';
+            buf[pos + 2] = b'T';
+            buf[pos + 3] = b'P';
         }
     }
 }

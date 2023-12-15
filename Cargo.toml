@@ -1,2 +1,6 @@
 [workspace]
 members = ["sender", "receiver", "tester", "common"]
+
+[profile.release-dbg]
+inherits = "release"
+debug = true

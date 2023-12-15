@@ -51,6 +51,10 @@ pub struct DataChunk {
     pub data: Vec<u8>,
 }
 
+impl DataChunk {
+    pub const MAX_CHUNK_LENGTH: usize = 1048576; // 1 MiB
+}
+
 impl BinarySerialize for DataChunk {
     fn serialize_to_stream(&self, writer: &mut impl io::Write) -> io::Result<()> {
         let id = self.file_id.as_bytes();
@@ -93,7 +97,7 @@ impl BinarySerialize for DataChunk {
         let len = u32::from_le_bytes(len_bytes);
 
         // 1 MiB
-        if len > 1048576 {
+        if len > Self::MAX_CHUNK_LENGTH as u32 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 format!("DataChunk length {} exceeds 1 MiB", len),

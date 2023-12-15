@@ -4,7 +4,10 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use common::{chunks::Chunk, control::ControlMessage};
+use common::{
+    chunks::{Chunk, DataChunk},
+    control::ControlMessage,
+};
 use crossbeam_channel::{Receiver, RecvError, SendError, Sender};
 use input_folder::InputFolderThreads;
 use ready_folder::ReadyFolderThreads;
@@ -44,6 +47,9 @@ impl FileServer {
         workdir: PathBuf,
         file_part_size: u32,
     ) -> io::Result<Self> {
+        assert!(file_part_size > 0);
+        assert!(file_part_size < DataChunk::MAX_CHUNK_LENGTH as u32);
+
         let (new_file_snd, new_file_rcv) = crossbeam_channel::unbounded();
         let (control_snd, control_rcv) = crossbeam_channel::unbounded();
 
