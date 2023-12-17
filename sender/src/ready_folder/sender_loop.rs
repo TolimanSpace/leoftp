@@ -1,5 +1,5 @@
 #![allow(clippy::comparison_chain)]
-use std::{path::PathBuf, thread::JoinHandle};
+use std::{path::PathBuf, rc::Rc, thread::JoinHandle};
 
 use common::{chunks::Chunk, control::ControlMessage, file_part_id::FilePartId};
 use crossbeam_channel::{Receiver, Sender, TryRecvError};
@@ -12,35 +12,35 @@ use super::ReadyFolderHandler;
 struct LoopKilled;
 
 #[derive(Debug)]
-struct PacketLocation<'a> {
-    file: &'a ReadyFile,
+struct PacketLocation {
+    file: Rc<ReadyFile>,
     part_id: FilePartId,
 }
 
-fn sort_packet_locations_by_importance(packet_locations: &mut [PacketLocation]) {
-    // Sort priority:
-    // Any header parts are higher priority than data parts `.part_id == FilePartId::Header`
-    // Sort by dates, so older files always get higher precedence `.file.header.date`
-    // Sort by part id `FilePartId::Part(part) = _.part_id`
-    packet_locations.sort_by(|a, b| {
+impl std::cmp::Ord for PacketLocation {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let a = self;
+        let b = other;
+
+        // Sort by header parts first. Headers always get highest priority.
         let a_header = a.part_id == FilePartId::Header;
         let b_header = b.part_id == FilePartId::Header;
-
         if a_header && !b_header {
             return std::cmp::Ordering::Less;
         } else if !a_header && b_header {
             return std::cmp::Ordering::Greater;
         }
 
+        // Then, sort by file date. Older files get higher precedence.
         let a_date = a.file.header.date;
         let b_date = b.file.header.date;
-
         if a_date < b_date {
             return std::cmp::Ordering::Less;
         } else if a_date > b_date {
             return std::cmp::Ordering::Greater;
         }
 
+        // Then, sort by part number. Lower part numbers get higher precedence.
         let a_part = match a.part_id {
             FilePartId::Part(part) => part,
             FilePartId::Header => 0,
@@ -49,9 +49,30 @@ fn sort_packet_locations_by_importance(packet_locations: &mut [PacketLocation]) 
             FilePartId::Part(part) => part,
             FilePartId::Header => 0,
         };
-
         a_part.cmp(&b_part)
-    });
+    }
+}
+
+impl std::cmp::PartialOrd for PacketLocation {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for PacketLocation {
+    fn eq(&self, other: &Self) -> bool {
+        self.file.header.id == other.file.header.id && self.part_id == other.part_id
+    }
+}
+
+impl Eq for PacketLocation {}
+
+fn sort_packet_locations_by_importance(packet_locations: &mut [PacketLocation]) {
+    // Sort priority:
+    // Any header parts are higher priority than data parts `.part_id == FilePartId::Header`
+    // Sort by dates, so older files always get higher precedence `.file.header.date`
+    // Sort by part id `FilePartId::Part(part) = _.part_id`
+    packet_locations.sort_by(|a, b| a.cmp(b));
 }
 
 struct SenderLoopHandler {
@@ -169,10 +190,11 @@ impl SenderLoopHandler {
 
             let mut packet_locations = Vec::new();
 
-            for ready_file in &ready_files {
+            for ready_file in ready_files {
+                let ready_file = Rc::new(ready_file);
                 for part in &ready_file.unsent_parts {
                     packet_locations.push(PacketLocation {
-                        file: ready_file,
+                        file: ready_file.clone(),
                         part_id: *part,
                     });
                 }
@@ -244,10 +266,11 @@ impl SenderLoopHandler {
 
             let mut packet_locations = Vec::new();
 
-            for ready_file in &old_folders_parsed {
+            for ready_file in old_folders_parsed {
+                let ready_file = Rc::new(ready_file);
                 for part in &ready_file.unsent_parts {
                     packet_locations.push(PacketLocation {
-                        file: ready_file,
+                        file: ready_file.clone(),
                         part_id: *part,
                     });
                 }
