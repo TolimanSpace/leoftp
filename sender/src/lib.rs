@@ -14,6 +14,7 @@ use ready_folder::ReadyFolderThreads;
 mod input_folder;
 mod ready_file;
 mod ready_folder;
+mod new;
 
 // Procedure:
 // 1. Service creates a new file in the input folder. The file is valid as long as it has no other file handles using it.
