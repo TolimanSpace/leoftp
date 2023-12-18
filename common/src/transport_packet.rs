@@ -62,6 +62,73 @@ impl TransportPacketData {
     }
 }
 
+impl BinarySerialize for TransportPacketData {
+    fn serialize_to_stream(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        match self {
+            TransportPacketData::HeaderChunk(header_chunk) => {
+                writer.write_all(&[0])?;
+                header_chunk.serialize_to_stream(writer)
+            }
+            TransportPacketData::DataChunk(data_chunk) => {
+                writer.write_all(&[1])?;
+                data_chunk.serialize_to_stream(writer)
+            }
+            TransportPacketData::AcknowledgementPacket(ack) => {
+                writer.write_all(&[128])?;
+                ack.serialize_to_stream(writer)
+            }
+            TransportPacketData::DeleteFile(delete_file) => {
+                writer.write_all(&[129])?;
+                delete_file.serialize_to_stream(writer)
+            }
+        }
+    }
+
+    fn length_when_serialized(&self) -> u32 {
+        let inner = match self {
+            TransportPacketData::HeaderChunk(header_chunk) => header_chunk.length_when_serialized(),
+            TransportPacketData::DataChunk(data_chunk) => data_chunk.length_when_serialized(),
+            TransportPacketData::AcknowledgementPacket(ack) => ack.length_when_serialized(),
+            TransportPacketData::DeleteFile(delete_file) => delete_file.length_when_serialized(),
+        };
+
+        1 // Type
+        + inner
+    }
+
+    fn deserialize_from_stream(reader: &mut impl std::io::Read) -> std::io::Result<Self>
+    where
+        Self: Sized,
+    {
+        let mut type_buf = [0u8; 1];
+        reader.read_exact(&mut type_buf)?;
+        let type_ = type_buf[0];
+
+        let data = match type_ {
+            0 => TransportPacketData::HeaderChunk(
+                crate::chunks::HeaderChunk::deserialize_from_stream(reader)?,
+            ),
+            1 => TransportPacketData::DataChunk(crate::chunks::DataChunk::deserialize_from_stream(
+                reader,
+            )?),
+            128 => TransportPacketData::AcknowledgementPacket(
+                crate::control::ConfirmPart::deserialize_from_stream(reader)?,
+            ),
+            129 => TransportPacketData::DeleteFile(
+                crate::control::DeleteFile::deserialize_from_stream(reader)?,
+            ),
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Invalid transport packet type {}", type_),
+                ))
+            }
+        };
+
+        Ok(data)
+    }
+}
+
 pub const CONST_PACKET_SIGNATURE: &[u8] = b"LFTP";
 
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
@@ -154,73 +221,28 @@ impl TransportPacketInner {
     pub fn data(self) -> TransportPacketData {
         self.data
     }
-
-    fn inner_data_len(&self) -> u32 {
-        match self.data {
-            TransportPacketData::HeaderChunk(ref header_chunk) => {
-                header_chunk.length_when_serialized()
-            }
-            TransportPacketData::DataChunk(ref data_chunk) => data_chunk.length_when_serialized(),
-            TransportPacketData::AcknowledgementPacket(ref ack) => ack.length_when_serialized(),
-            TransportPacketData::DeleteFile(ref delete_file) => {
-                delete_file.length_when_serialized()
-            }
-        }
-    }
 }
 
 impl BinarySerialize for TransportPacketInner {
     fn serialize_to_stream(&self, mut writer: &mut impl std::io::Write) -> std::io::Result<()> {
-        let hash = match self.data {
-            TransportPacketData::HeaderChunk(ref header_chunk) => {
-                writer.write_all(&[0])?;
-                writer.write_all(&header_chunk.length_when_serialized().to_le_bytes())?;
-                let mut writer = HashedWriter::new(ScramblingWriter::new(&mut writer));
-                header_chunk.serialize_to_stream(&mut writer)?;
-                writer.result()
-            }
-            TransportPacketData::DataChunk(ref data_chunk) => {
-                writer.write_all(&[1])?;
-                writer.write_all(&data_chunk.length_when_serialized().to_le_bytes())?;
-                let mut writer = HashedWriter::new(ScramblingWriter::new(&mut writer));
-                data_chunk.serialize_to_stream(&mut writer)?;
-                writer.result()
-            }
-            TransportPacketData::AcknowledgementPacket(ref ack) => {
-                writer.write_all(&[128])?;
-                writer.write_all(&ack.length_when_serialized().to_le_bytes())?;
-                let mut writer = HashedWriter::new(ScramblingWriter::new(&mut writer));
-                ack.serialize_to_stream(&mut writer)?;
-                writer.result()
-            }
-            TransportPacketData::DeleteFile(ref delete_file) => {
-                writer.write_all(&[129])?;
-                writer.write_all(&delete_file.length_when_serialized().to_le_bytes())?;
-                let mut writer = HashedWriter::new(ScramblingWriter::new(&mut writer));
-                delete_file.serialize_to_stream(&mut writer)?;
-                writer.result()
-            }
-        };
-
+        writer.write_all(&self.data.length_when_serialized().to_le_bytes())?;
+        let mut inner_writer = HashedWriter::new(ScramblingWriter::new(&mut writer));
+        self.data.serialize_to_stream(&mut inner_writer)?;
+        let hash = inner_writer.result();
         writer.write_all(&hash.to_le_bytes())?;
 
         Ok(())
     }
 
     fn length_when_serialized(&self) -> u32 {
-        1 // Type
-        + 4// Length
-        + self.inner_data_len()
+        4// Length
+        + self.data.length_when_serialized()
     }
 
     fn deserialize_from_stream(mut reader: &mut impl std::io::Read) -> std::io::Result<Self>
     where
         Self: Sized,
     {
-        let mut type_buf = [0u8; 1];
-        reader.read_exact(&mut type_buf)?;
-        let type_ = type_buf[0];
-
         let mut len_bytes = [0u8; 4];
         reader.read_exact(&mut len_bytes)?;
         let len = u32::from_le_bytes(len_bytes);
@@ -238,7 +260,7 @@ impl BinarySerialize for TransportPacketInner {
 
         let mut inner_reader = SubstreamReader::new(&mut reader, len as usize);
         let mut inner_reader = HashedReader::new(UnscramblingReader::new(&mut inner_reader));
-        let inner_data = parse_data_from_type(type_, &mut inner_reader)?;
+        let inner_data = TransportPacketData::deserialize_from_stream(&mut inner_reader)?;
         let calculated_hash = inner_reader.result();
 
         let mut hash_buf = [0u8; 8];
@@ -258,7 +280,7 @@ impl BinarySerialize for TransportPacketInner {
 
 impl ValidityCheck for TransportPacketInner {
     fn is_valid(&self) -> bool {
-        self.data.is_valid() && self.inner_data_len() <= Self::MAX_DATA_LEN as u32
+        self.data.is_valid() && self.data.length_when_serialized() <= Self::MAX_DATA_LEN as u32
     }
 }
 

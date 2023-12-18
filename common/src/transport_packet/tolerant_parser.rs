@@ -1,7 +1,7 @@
 use std::hash::Hasher;
 use std::io::{self, Read};
 
-use crate::transport_packet::parse_data_from_type;
+use crate::binary_serialize::BinarySerialize;
 use crate::transport_packet::scrambling::UnscramblingReader;
 use crate::transport_packet::substream::SubstreamReader;
 
@@ -130,10 +130,6 @@ fn parse_next_packet(
 
     stream.checkpoint();
 
-    let mut type_buf = [0u8; 1];
-    stream.read_exact(&mut type_buf)?;
-    let type_ = type_buf[0];
-
     // Parse length
     let mut length_buf = [0u8; 4];
     stream.read_exact(&mut length_buf)?;
@@ -182,7 +178,7 @@ fn parse_next_packet(
     stream.rollback();
 
     let mut substream = SubstreamReader::new(UnscramblingReader::new(&mut stream), length as usize);
-    let parsed = parse_data_from_type(type_, &mut substream);
+    let parsed = TransportPacketData::deserialize_from_stream(&mut substream);
     let reached_end = substream.reached_end();
 
     // Skip hash value
