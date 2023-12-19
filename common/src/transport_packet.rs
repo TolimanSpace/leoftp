@@ -1,15 +1,16 @@
-use crate::{binary_serialize::BinarySerialize, chunks::Chunk, validity::ValidityCheck};
+use crate::{
+    binary_serialize::BinarySerialize, chunks::Chunk, substream::SubstreamReader,
+    validity::ValidityCheck,
+};
 
 use self::{
     hashing::{HashedReader, HashedWriter},
     scrambling::{ScramblingWriter, UnscramblingReader},
-    substream::SubstreamReader,
 };
 
 mod checkpoint_stream;
 mod hashing;
 mod scrambling;
-mod substream;
 mod tolerant_parser;
 pub use tolerant_parser::parse_transport_packet_stream;
 

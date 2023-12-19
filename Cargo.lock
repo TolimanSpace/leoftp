@@ -378,6 +378,7 @@ name = "sender"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bincode",
  "chrono",
  "common",
  "crossbeam-channel",

@@ -2,8 +2,8 @@ use std::hash::Hasher;
 use std::io::{self, Read};
 
 use crate::binary_serialize::BinarySerialize;
+use crate::substream::SubstreamReader;
 use crate::transport_packet::scrambling::UnscramblingReader;
-use crate::transport_packet::substream::SubstreamReader;
 
 use super::TransportPacketData;
 use super::{checkpoint_stream::StreamWithCheckpoints, TransportPacket};

@@ -58,14 +58,14 @@ impl ValidityCheck for FilePartId {
 
 impl Serialize for FilePartId {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_u32(self.to_index())
+        serializer.serialize_i32(self.to_index() as i32)
     }
 }
 
 impl<'de> Deserialize<'de> for FilePartId {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let index = u32::deserialize(deserializer)?;
-        Ok(FilePartId::from_index(index))
+        let index = i32::deserialize(deserializer)?;
+        Ok(FilePartId::from_index(index as u32))
     }
 }
 
