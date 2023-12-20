@@ -22,9 +22,7 @@ impl TempDirProvider {
 
     #[cfg(test)]
     pub fn new_test() -> Self {
-        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("target")
-            .join("_tempfs");
+        let base = PathBuf::from("_tempfs");
 
         Self::new(base)
     }

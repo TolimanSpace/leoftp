@@ -1,7 +1,6 @@
 use std::{
-    fmt::Write,
-    fs::File,
-    io::{self, Read, Seek},
+    fs::{File, OpenOptions},
+    io::{self, BufWriter, Read, Seek, Write},
     path::{Path, PathBuf},
 };
 
@@ -9,16 +8,20 @@ use common::{
     binary_serialize::BinarySerialize, chunks::HeaderChunk, file_part_id::FilePartId,
     substream::SubstreamReader,
 };
-use serde::{Deserialize, Serialize};
+
+use self::{mode::ManagedFileMode, state::ManagedFileState};
+
+mod mode;
+mod state;
 
 /// Managed file structure:
 ///
 /// ```plaintext
 /// [folder root]/  - The root folder, usually the file id
 /// ├── header.json - The human-readable header file. This is never read.
-/// ├── state.json  - The human-readable state file. This is never read.
 /// ├
 /// ├── header.bin  - The machine-readable header file.
+/// ├── mode.bin    - The mode of the file, representing either "contiguous" or "split".
 /// ├── state.bin   - The state file. It marks which parts are acknowledged.
 /// ├
 /// ├── data.bin    - The raw file binary data. This is present in contiguous mode.
@@ -37,8 +40,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// When a managed file is being created, the following steps are made:
 /// 1. Create the folder
-/// 2. Create the header.json and state.json files
-/// 3. Create the the header.bin file and the state.bin file
+/// 2. Create the header.json files
+/// 3. Create the the header.bin, mode.bin the state.bin file
 /// 4. Move in the data.bin file
 ///
 /// The state should be "contiguous".
@@ -56,7 +59,8 @@ use serde::{Deserialize, Serialize};
 /// ### Acknowledging process
 ///
 /// When a part of a contuguous managed file part is acknowledged, the state files should be updated.
-/// Nothing else is affected. If zero parts are left, then the managed file can safely be deleted.
+/// If the data.bin file can be shrunk down from the end, then it is shrunk accordingly. If zero parts
+/// are left, then the managed file can safely be deleted.
 ///
 /// ## Splitting process
 ///
@@ -87,61 +91,47 @@ use serde::{Deserialize, Serialize};
 pub struct ManagedFile {
     pub folder_path: PathBuf,
     pub header: HeaderChunk,
+    pub mode: ManagedFileMode,
     pub state: ManagedFileState,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ManagedFileState {
-    pub mode: ManagedFileStateMode,
-    pub remaining_parts: Vec<ManagedFileStatePart>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ManagedFileStateMode {
-    Contiguous,
-    Split,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ManagedFileStatePart {
-    pub part: FilePartId,
-    pub priority: i16,
 }
 
 impl ManagedFile {
     /// Please reference the doc comment on [`ManagedFile`] for more information.
     pub fn create_new_from_header(
         path: impl AsRef<Path>,
+        data_file_path: impl AsRef<Path>,
         header: HeaderChunk,
     ) -> anyhow::Result<Self> {
         let path = path.as_ref();
-        let state = ManagedFileState::new_from_header(&header);
+        let data_file_path = data_file_path.as_ref();
+        let mode = ManagedFileMode::Contiguous;
 
         // 1. Create the folder
         std::fs::create_dir_all(path)?;
 
-        // 2. Create the header.json and state.json files
+        // 2. Create the header.json file
         write_file_atomic(path.join("header.json"), |file| {
             Ok(serde_json::to_writer_pretty(file, &header)?)
         })?;
-        write_file_atomic(path.join("state.json"), |file| {
-            Ok(serde_json::to_writer_pretty(file, &state)?)
-        })?;
 
-        // 3. Create the the header.bin file and the state.bin file
+        // 3. Create the the header.bin, mode.bin the state.bin file
         write_file_atomic(path.join("header.bin"), |file| {
             Ok(header.serialize_to_stream(file)?)
         })?;
-        write_file_atomic(path.join("state.bin"), |file| {
-            Ok(bincode::serialize_into(file, &state)?)
+        write_file_atomic(path.join("mode.bin"), |file| {
+            Ok(mode.serialize_to_stream(file)?)
         })?;
 
+        let state_path = path.join("state.bin");
+        let state = ManagedFileState::new_from_part_count(header.part_count, &state_path)?;
+
         // 4. Move in the data.bin file
-        std::fs::rename(path.join("data.bin"), path.join("data.bin"))?;
+        std::fs::rename(data_file_path, path.join("data.bin"))?;
 
         Ok(Self {
             folder_path: path.to_path_buf(),
             header,
+            mode,
             state,
         })
     }
@@ -194,13 +184,26 @@ impl ManagedFile {
             return Ok(None);
         }
 
-        let mut state_file = File::open(state_path)?;
-        let state: ManagedFileState = bincode::deserialize_from(&mut state_file)?;
+        let state: ManagedFileState = ManagedFileState::load_from_file(state_path)?;
+
+        // Read mode.bin, if it's missing then it's invalid
+        let mode_path = path.join("mode.bin");
+        if !mode_path.is_file() {
+            tracing::warn!(
+                "Managed file folder was missing mode.bin, deleting: {:?}",
+                path
+            );
+            cleanup();
+            return Ok(None);
+        }
+
+        let mut mode_file = File::open(mode_path)?;
+        let mode: ManagedFileMode = BinarySerialize::deserialize_from_stream(&mut mode_file)?;
 
         let mut should_trigger_splitting = false;
 
-        match state.mode {
-            ManagedFileStateMode::Contiguous => {
+        match mode {
+            ManagedFileMode::Contiguous => {
                 // If the state is "contugous" and data.bin is missing, then the file
                 // is invalid, as the creation process must've been interrupted.
                 let data_path = path.join("data.bin");
@@ -224,7 +227,7 @@ impl ManagedFile {
                     should_trigger_splitting = true;
                 }
             }
-            ManagedFileStateMode::Split => {
+            ManagedFileMode::Split => {
                 // If the state is "split" and the data folder is missing, then the state is invalid and
                 // the file can be deleted.
                 let data_folder_path = path.join("data");
@@ -282,7 +285,7 @@ impl ManagedFile {
                     };
 
                     // If the part is not in the state, then it can be deleted.
-                    if !state.remaining_parts.iter().any(|p| p.part == part) {
+                    if !state.remaining_parts().iter().any(|p| p.part == part) {
                         std::fs::remove_file(file)?;
                     }
 
@@ -290,11 +293,11 @@ impl ManagedFile {
                 }
 
                 // If less parts were found than expected, then we error
-                if found_parts < state.remaining_parts.len() {
+                if found_parts < state.remaining_parts().len() {
                     tracing::error!(
                         "Found {} parts in the data folder, but the state expects {}",
                         found_parts,
-                        state.remaining_parts.len()
+                        state.remaining_parts().len()
                     );
                     cleanup();
                     return Ok(None);
@@ -305,6 +308,7 @@ impl ManagedFile {
         let mut file = Self {
             folder_path: path.to_path_buf(),
             header,
+            mode,
             state,
         };
 
@@ -335,12 +339,12 @@ impl ManagedFile {
                     anyhow::bail!("Part index out of bounds");
                 }
 
-                if !self.state.remaining_parts.iter().any(|p| p.part == part) {
+                if !self.state.remaining_parts().iter().any(|p| p.part == part) {
                     anyhow::bail!("Part has already been acknolwedged");
                 }
 
-                match self.state.mode {
-                    ManagedFileStateMode::Contiguous => {
+                match self.mode {
+                    ManagedFileMode::Contiguous => {
                         let file_path = self.folder_path.join("data.bin");
                         let mut file = File::open(file_path)?;
 
@@ -351,7 +355,7 @@ impl ManagedFile {
                         let file = SubstreamReader::new(file, part_size);
                         Ok(file)
                     }
-                    ManagedFileStateMode::Split => {
+                    ManagedFileMode::Split => {
                         let file_path = self
                             .folder_path
                             .join(format!("data/{}.bin", part.as_string()));
@@ -367,31 +371,49 @@ impl ManagedFile {
     }
 
     pub fn trigger_file_split(&mut self) -> anyhow::Result<()> {
-        if self.state.mode == ManagedFileStateMode::Split {
+        if self.mode == ManagedFileMode::Split {
             anyhow::bail!("File is already split");
         }
 
         // 1. Create the data folder
         std::fs::create_dir_all(self.folder_path.join("data"))?;
 
-        // 2. Split the data.bin into the data folder based on remaining parts.
-        for part in self.state.remaining_parts.iter() {
-            let part_id = match part.part {
-                FilePartId::Header => continue,
-                FilePartId::Part(i) => i,
-            };
+        // Prepare data (open the file, get all the non-header remaining parts sorted in reverse)
+        let mut file = File::open(self.folder_path.join("data.bin"))?;
+        let remaining_parts = &self.state.remaining_parts();
+        let mut remaining_part_numbers = remaining_parts
+            .iter()
+            .filter_map(|p| match p.part {
+                FilePartId::Header => None,
+                FilePartId::Part(i) => Some(i),
+            })
+            .collect::<Vec<_>>();
+        // Sort reverse. We start from the last part and work our way backwards.
+        remaining_part_numbers.sort_by(|a, b| b.cmp(a));
 
-            let mut part_file =
-                File::create(self.folder_path.join(format!("data/{}.bin", part_id)))?;
+        // 2. Split the data.bin into the data folder based on remaining parts, starting
+        // from the last part and working our way backwards, reducing the file size as we go.
+        for part_id in remaining_part_numbers {
+            let part_size = self.header.file_part_size as usize;
+            let offset = part_id as usize * part_size;
+            let max = offset + part_size;
 
-            let mut reader = self.get_file_part_reader(part.part)?;
-            io::copy(&mut reader, &mut part_file)?;
+            if max > file.metadata()?.len() as usize {
+                anyhow::bail!("File size is smaller than expected");
+            }
+
+            file.seek(io::SeekFrom::Start(offset as u64))?;
+            let mut reader = SubstreamReader::new(&mut file, part_size);
+
+            let path = self.folder_path.join(format!("data/{}.bin", part_id));
+            write_file_atomic(path, move |file| {
+                io::copy(&mut reader, file)?;
+                Ok(())
+            })?;
         }
 
         // 3. Modify the state to be "split"
-        self.modify_state(|state| {
-            state.mode = ManagedFileStateMode::Split;
-        })?;
+        self.set_mode(ManagedFileMode::Split)?;
 
         // 4. Delete the data.bin file
         std::fs::remove_file(self.folder_path.join("data.bin"))?;
@@ -400,32 +422,100 @@ impl ManagedFile {
     }
 
     fn decrease_part_priority(&mut self, part: FilePartId) -> anyhow::Result<()> {
-        self.modify_state(|state| {
-            let part = match state.remaining_parts.iter_mut().find(|p| p.part == part) {
-                Some(part) => part,
-                None => {
-                    tracing::warn!(
-                        "Tried to decrease priority of part {} but it wasn't found",
-                        part
-                    );
-                    return;
-                }
-            };
-
-            part.priority -= 1;
-        })?;
+        self.state.modify_part_priority(part, |p| {
+            *p -= 1;
+        });
 
         Ok(())
     }
 
-    fn modify_state(&mut self, modify: impl FnOnce(&mut ManagedFileState)) -> anyhow::Result<()> {
-        modify(&mut self.state);
+    fn acknowledge_file_part(&mut self, part: FilePartId) -> anyhow::Result<()> {
+        // First, update the state
+        self.state.filter_remaining_parts(|p| p.part != part)?;
 
-        write_file_atomic(self.folder_path.join("state.bin"), |file| {
-            Ok(bincode::serialize_into(file, &self.state)?)
-        })?;
-        write_file_atomic(self.folder_path.join("state.json"), |file| {
-            Ok(serde_json::to_writer_pretty(file, &self.state)?)
+        // Then, delete the data accordingly
+        match self.mode {
+            ManagedFileMode::Contiguous => {
+                // Find the last part number that's unacknowledged
+                let mut last_unacknowledged_part = None;
+                let mut header_acknowledged = true;
+                for part in self.state.remaining_parts().iter() {
+                    match part.part {
+                        FilePartId::Header => {
+                            header_acknowledged = false;
+                        }
+                        FilePartId::Part(i) => {
+                            if let Some(last) = last_unacknowledged_part {
+                                if i > last {
+                                    last_unacknowledged_part = Some(i);
+                                }
+                            } else {
+                                last_unacknowledged_part = Some(i);
+                            }
+                        }
+                    }
+                }
+
+                // If the whole file is acknowledged, then it's safe to delete
+                if header_acknowledged && last_unacknowledged_part.is_none() {
+                    std::fs::remove_dir_all(&self.folder_path)?;
+                    return Ok(());
+                }
+
+                // Open the file
+                let file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(self.folder_path.join("data.bin"))?;
+
+                // Determine the resulting file size
+                let result_len = if let Some(last) = last_unacknowledged_part {
+                    let part_size = self.header.file_part_size as u64;
+                    (last + 1) as u64 * part_size
+                } else {
+                    0
+                };
+
+                // Shrink the file to the correct size
+                let file_current_len = file.metadata()?.len();
+                if file_current_len > result_len {
+                    file.set_len(result_len)?;
+                }
+            }
+            ManagedFileMode::Split => {
+                // Get the file part number if it's a file part. If it's a header, do nothing.
+                let FilePartId::Part(i) = part else {
+                    return Ok(());
+                };
+
+                // Find the .bin file for the acknowledged part
+                let file_path = self.folder_path.join(format!("data/{}.bin", i));
+
+                // If the file doesn't exist already, do nothing.
+                if !file_path.is_file() {
+                    return Ok(());
+                }
+
+                // Delete the file
+                let result = std::fs::remove_file(file_path);
+                if let Err(e) = result {
+                    tracing::error!(
+                        "Failed to delete file part {} in managed file folder: {}",
+                        i,
+                        e
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn set_mode(&mut self, new_mode: ManagedFileMode) -> anyhow::Result<()> {
+        self.mode = new_mode;
+
+        write_file_atomic(self.folder_path.join("mode.bin"), |file| {
+            Ok(self.mode.serialize_to_stream(file)?)
         })?;
 
         Ok(())
@@ -434,13 +524,17 @@ impl ManagedFile {
 
 fn write_file_atomic(
     path: impl AsRef<Path>,
-    write: impl FnOnce(&mut File) -> anyhow::Result<()>,
+    write: impl FnOnce(&mut BufWriter<&mut File>) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
     let path = path.as_ref();
     let tmp_path = path.with_extension("-tmp");
 
     let mut file = std::fs::File::create(&tmp_path)?;
-    write(&mut file)?;
+    let mut writer = BufWriter::new(&mut file);
+    write(&mut writer)?;
+    writer.flush()?;
+    drop(writer);
+
     file.sync_all()?;
     drop(file);
 
@@ -449,21 +543,163 @@ fn write_file_atomic(
     Ok(())
 }
 
-impl ManagedFileState {
-    pub fn new_from_header(header: &HeaderChunk) -> Self {
-        let mode = ManagedFileStateMode::Contiguous;
-        let part_count = header.part_count;
+#[cfg(test)]
+mod tests {
+    use super::{state::ManagedFileState, *};
+    use crate::new::tempdir::{TempDir, TempDirProvider};
 
-        let remaining_parts = (0..part_count)
-            .map(|i| ManagedFileStatePart {
-                part: FilePartId::Part(i),
-                priority: 0,
-            })
-            .collect();
+    struct DummyFile {
+        _folder: TempDir,
+        path: PathBuf,
+    }
 
-        Self {
-            mode,
-            remaining_parts,
+    fn make_dummy_file(size: u64) -> anyhow::Result<DummyFile> {
+        let folder = TempDirProvider::new_test().create()?;
+        let path = folder.path().join("data.bin");
+
+        let file = File::create(&path)?;
+        file.set_len(size)?;
+
+        Ok(DummyFile {
+            _folder: folder,
+            path,
+        })
+    }
+
+    fn make_test_header(file_size: u64, part_size: u64) -> HeaderChunk {
+        HeaderChunk {
+            id: uuid::Uuid::new_v4(),
+            date: 123456789,
+            name: "test".to_string(),
+            file_part_size: part_size as u32,
+            size: file_size,
+            part_count: if file_size % part_size == 0 {
+                (file_size / part_size) as u32
+            } else {
+                (file_size / part_size + 1) as u32
+            },
         }
+    }
+
+    fn make_test_managed_file(
+        path: impl AsRef<Path>,
+        file_size: u64,
+        part_size: u64,
+    ) -> anyhow::Result<ManagedFile> {
+        let header = make_test_header(file_size, part_size);
+        let file = make_dummy_file(file_size)?;
+        ManagedFile::create_new_from_header(path, file.path, header)
+    }
+
+    fn assert_file_exists(path: impl AsRef<Path>) {
+        assert!(path.as_ref().exists());
+    }
+
+    fn assert_file_exists_with_size(path: impl AsRef<Path>, size: u64) {
+        assert_file_exists(&path);
+        assert_eq!(std::fs::metadata(&path).unwrap().len(), size);
+    }
+
+    fn assert_file_doesnt_exist(path: impl AsRef<Path>) {
+        assert!(!path.as_ref().exists());
+    }
+
+    fn read_state(folder_path: impl AsRef<Path>) -> ManagedFileState {
+        let state_path = folder_path.as_ref().join("state.bin");
+        ManagedFileState::load_from_file(state_path).unwrap()
+    }
+
+    fn read_mode(folder_path: impl AsRef<Path>) -> ManagedFileMode {
+        let mode_path = folder_path.as_ref().join("mode.bin");
+        let mut file = File::open(mode_path).unwrap();
+        BinarySerialize::deserialize_from_stream(&mut file).unwrap()
+    }
+
+    #[test]
+    fn test_file_data() -> anyhow::Result<()> {
+        let folder = TempDirProvider::new_test().create()?;
+        let mut file = make_test_managed_file(folder.path(), 100, 10)?;
+
+        assert_file_exists(folder.path().join("header.bin"));
+        assert_file_exists(folder.path().join("state.bin"));
+        assert_file_exists_with_size(folder.path().join("data.bin"), 100);
+        dbg!(&file.folder_path);
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 11); // 10 + header
+        let mode = read_mode(folder.path());
+        assert_eq!(mode, ManagedFileMode::Contiguous);
+
+        file.trigger_file_split()?;
+
+        assert_file_exists(folder.path().join("header.bin"));
+        assert_file_exists(folder.path().join("state.bin"));
+        for i in 0..10 {
+            assert_file_exists_with_size(folder.path().join(format!("data/{i}.bin")), 10);
+        }
+        assert_file_doesnt_exist(folder.path().join("data/10.bin"));
+        assert_file_doesnt_exist(folder.path().join("data.bin"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_acknowledging_contiguous() -> anyhow::Result<()> {
+        let folder = TempDirProvider::new_test().create()?;
+        let mut file = make_test_managed_file(folder.path(), 100, 10)?;
+
+        file.acknowledge_file_part(FilePartId::Part(9))?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 10);
+        assert_file_exists_with_size(folder.path().join("data.bin"), 90);
+
+        file.acknowledge_file_part(FilePartId::Part(7))?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 9);
+        assert_file_exists_with_size(folder.path().join("data.bin"), 90); // Still 90, because we haven't acknowledged part 8
+
+        file.acknowledge_file_part(FilePartId::Part(8))?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 8);
+        assert_file_exists_with_size(folder.path().join("data.bin"), 70);
+
+        file.acknowledge_file_part(FilePartId::Part(0))?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 7);
+        assert_file_exists_with_size(folder.path().join("data.bin"), 70); // Again, there's parts in front
+
+        file.acknowledge_file_part(FilePartId::Header)?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 6);
+        assert_file_exists_with_size(folder.path().join("data.bin"), 70); // Header shouldn't affect this
+
+        // Expect header to still exist
+        assert_file_exists(folder.path().join("header.bin"));
+
+        // Check the remaining parts are still there
+        let parts = [
+            FilePartId::Part(1),
+            FilePartId::Part(2),
+            FilePartId::Part(3),
+            FilePartId::Part(4),
+            FilePartId::Part(5),
+            FilePartId::Part(6),
+        ];
+
+        let state = read_state(folder.path());
+        for part in parts {
+            let exists = state.remaining_parts().iter().any(|p| p.part == part);
+            if !exists {
+                dbg!(state.remaining_parts());
+                panic!("Part {:?} was not found in the remaining parts", part);
+            }
+        }
+
+        Ok(())
     }
 }

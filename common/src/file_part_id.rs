@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::validity::ValidityCheck;
+use crate::{binary_serialize::BinarySerialize, validity::ValidityCheck};
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum FilePartId {
@@ -78,5 +78,69 @@ impl std::fmt::Display for FilePartId {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Hash(pub u64);
+impl PartialOrd for FilePartId {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FilePartId {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (FilePartId::Header, FilePartId::Header) => std::cmp::Ordering::Equal,
+            (FilePartId::Header, FilePartId::Part(_)) => std::cmp::Ordering::Less,
+            (FilePartId::Part(_), FilePartId::Header) => std::cmp::Ordering::Greater,
+            (FilePartId::Part(i), FilePartId::Part(j)) => i.cmp(j),
+        }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq, Debug)]
+pub struct FilePartIdRangeInclusive {
+    pub from: FilePartId,
+    pub to: FilePartId,
+}
+
+impl FilePartIdRangeInclusive {
+    pub fn new(from: FilePartId, to: FilePartId) -> Self {
+        Self { from, to }
+    }
+
+    pub fn new_single(id: FilePartId) -> Self {
+        Self { from: id, to: id }
+    }
+
+    pub fn contains(&self, id: FilePartId) -> bool {
+        self.from <= id && id <= self.to
+    }
+}
+
+impl BinarySerialize for FilePartIdRangeInclusive {
+    fn serialize_to_stream(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        let from_int = self.from.to_index();
+        let to_int = self.to.to_index();
+
+        writer.write_all(&from_int.to_be_bytes())?;
+        writer.write_all(&to_int.to_be_bytes())?;
+
+        Ok(())
+    }
+
+    fn deserialize_from_stream(reader: &mut impl std::io::Read) -> std::io::Result<Self> {
+        let mut from_bytes = [0u8; 4];
+        reader.read_exact(&mut from_bytes)?;
+        let from_int = u32::from_be_bytes(from_bytes);
+        let from = FilePartId::from_index(from_int);
+
+        let mut to_bytes = [0u8; 4];
+        reader.read_exact(&mut to_bytes)?;
+        let to_int = u32::from_be_bytes(to_bytes);
+        let to = FilePartId::from_index(to_int);
+
+        Ok(Self { from, to })
+    }
+
+    fn length_when_serialized(&self) -> u32 {
+        8
+    }
+}
