@@ -302,34 +302,6 @@ impl ValidityCheck for TransportPacketData {
     }
 }
 
-fn parse_data_from_type(
-    type_: u8,
-    stream: &mut impl std::io::Read,
-) -> std::io::Result<TransportPacketData> {
-    let data = match type_ {
-        0 => TransportPacketData::HeaderChunk(crate::chunks::HeaderChunk::deserialize_from_stream(
-            stream,
-        )?),
-        1 => TransportPacketData::DataChunk(crate::chunks::DataChunk::deserialize_from_stream(
-            stream,
-        )?),
-        128 => TransportPacketData::AcknowledgementPacket(
-            crate::control::ConfirmPart::deserialize_from_stream(stream)?,
-        ),
-        129 => TransportPacketData::DeleteFile(
-            crate::control::DeleteFile::deserialize_from_stream(stream)?,
-        ),
-        _ => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("Invalid transport packet type {}", type_),
-            ))
-        }
-    };
-
-    Ok(data)
-}
-
 #[cfg(test)]
 mod tests {
     use crate::chunks::DataChunk;

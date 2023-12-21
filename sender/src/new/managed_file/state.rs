@@ -136,6 +136,19 @@ impl ManagedFileState {
     pub fn remaining_parts(&self) -> &[ManagedFileStatePart] {
         &self.remaining_parts
     }
+
+    pub fn remaining_non_header_parts_len(&self) -> usize {
+        let contains_header = self
+            .remaining_parts
+            .iter()
+            .any(|p| p.part == FilePartId::Header);
+
+        if contains_header {
+            self.remaining_parts.len() - 1
+        } else {
+            self.remaining_parts.len()
+        }
+    }
 }
 
 fn serialize_part_to_stream(
