@@ -5,7 +5,9 @@ use std::{
 };
 
 use common::{
-    binary_serialize::BinarySerialize, chunks::HeaderChunk, file_part_id::FilePartId,
+    binary_serialize::BinarySerialize,
+    chunks::HeaderChunk,
+    file_part_id::{FilePartId, FilePartIdRangeInclusive},
     substream::SubstreamReader,
 };
 
@@ -424,14 +426,18 @@ impl ManagedFile {
     fn decrease_part_priority(&mut self, part: FilePartId) -> anyhow::Result<()> {
         self.state.modify_part_priority(part, |p| {
             *p -= 1;
-        });
+        })?;
 
         Ok(())
     }
 
-    fn acknowledge_file_part(&mut self, part: FilePartId) -> anyhow::Result<()> {
+    fn acknowledge_file_part(
+        &mut self,
+        part_range: FilePartIdRangeInclusive,
+    ) -> anyhow::Result<()> {
         // First, update the state
-        self.state.filter_remaining_parts(|p| p.part != part)?;
+        self.state
+            .filter_remaining_parts(|p| !part_range.contains(p.part))?;
 
         // Then, delete the data accordingly
         match self.mode {
@@ -483,27 +489,29 @@ impl ManagedFile {
                 }
             }
             ManagedFileMode::Split => {
-                // Get the file part number if it's a file part. If it's a header, do nothing.
-                let FilePartId::Part(i) = part else {
-                    return Ok(());
-                };
+                for part in part_range.iter_parts() {
+                    // Get the file part number if it's a file part. If it's a header, do nothing.
+                    let FilePartId::Part(i) = part else {
+                        return Ok(());
+                    };
 
-                // Find the .bin file for the acknowledged part
-                let file_path = self.folder_path.join(format!("data/{}.bin", i));
+                    // Find the .bin file for the acknowledged part
+                    let file_path = self.folder_path.join(format!("data/{}.bin", i));
 
-                // If the file doesn't exist already, do nothing.
-                if !file_path.is_file() {
-                    return Ok(());
-                }
+                    // If the file doesn't exist already, do nothing.
+                    if !file_path.is_file() {
+                        return Ok(());
+                    }
 
-                // Delete the file
-                let result = std::fs::remove_file(file_path);
-                if let Err(e) = result {
-                    tracing::error!(
-                        "Failed to delete file part {} in managed file folder: {}",
-                        i,
-                        e
-                    );
+                    // Delete the file
+                    let result = std::fs::remove_file(file_path);
+                    if let Err(e) = result {
+                        tracing::error!(
+                            "Failed to delete file part {} in managed file folder: {}",
+                            i,
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -592,7 +600,7 @@ mod tests {
     }
 
     fn assert_file_exists(path: impl AsRef<Path>) {
-        assert!(path.as_ref().exists());
+        assert!(path.as_ref().exists(), "{:?} doesn't exist", path.as_ref());
     }
 
     fn assert_file_exists_with_size(path: impl AsRef<Path>, size: u64) {
@@ -601,7 +609,7 @@ mod tests {
     }
 
     fn assert_file_doesnt_exist(path: impl AsRef<Path>) {
-        assert!(!path.as_ref().exists());
+        assert!(!path.as_ref().exists(), "{:?} exists", path.as_ref());
     }
 
     fn read_state(folder_path: impl AsRef<Path>) -> ManagedFileState {
@@ -647,32 +655,34 @@ mod tests {
     fn test_acknowledging_contiguous() -> anyhow::Result<()> {
         let folder = TempDirProvider::new_test().create()?;
         let mut file = make_test_managed_file(folder.path(), 100, 10)?;
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 11);
 
-        file.acknowledge_file_part(FilePartId::Part(9))?;
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Part(9)))?;
 
         let state = read_state(folder.path());
         assert_eq!(state.remaining_parts().len(), 10);
         assert_file_exists_with_size(folder.path().join("data.bin"), 90);
 
-        file.acknowledge_file_part(FilePartId::Part(7))?;
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Part(7)))?;
 
         let state = read_state(folder.path());
         assert_eq!(state.remaining_parts().len(), 9);
         assert_file_exists_with_size(folder.path().join("data.bin"), 90); // Still 90, because we haven't acknowledged part 8
 
-        file.acknowledge_file_part(FilePartId::Part(8))?;
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Part(8)))?;
 
         let state = read_state(folder.path());
         assert_eq!(state.remaining_parts().len(), 8);
         assert_file_exists_with_size(folder.path().join("data.bin"), 70);
 
-        file.acknowledge_file_part(FilePartId::Part(0))?;
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Part(0)))?;
 
         let state = read_state(folder.path());
         assert_eq!(state.remaining_parts().len(), 7);
         assert_file_exists_with_size(folder.path().join("data.bin"), 70); // Again, there's parts in front
 
-        file.acknowledge_file_part(FilePartId::Header)?;
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Header))?;
 
         let state = read_state(folder.path());
         assert_eq!(state.remaining_parts().len(), 6);
@@ -699,6 +709,117 @@ mod tests {
                 panic!("Part {:?} was not found in the remaining parts", part);
             }
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_acknowledging_split() -> anyhow::Result<()> {
+        let folder = TempDirProvider::new_test().create()?;
+        let mut file = make_test_managed_file(folder.path(), 100, 10)?;
+
+        file.trigger_file_split()?;
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 11);
+
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Part(9)))?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 10);
+        assert_file_doesnt_exist(folder.path().join("data/9.bin"));
+
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Part(7)))?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 9);
+        assert_file_doesnt_exist(folder.path().join("data/7.bin"));
+
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Part(8)))?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 8);
+        assert_file_doesnt_exist(folder.path().join("data/8.bin"));
+
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new(
+            FilePartId::Part(0),
+            FilePartId::Part(2),
+        ))?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 5);
+        assert_file_doesnt_exist(folder.path().join("data/0.bin"));
+
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Header))?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 4);
+
+        // Expect header to still exist
+        assert_file_exists(folder.path().join("header.bin"));
+
+        // Check the remaining parts are still there
+        let parts = [
+            FilePartId::Part(3),
+            FilePartId::Part(4),
+            FilePartId::Part(5),
+            FilePartId::Part(6),
+        ];
+
+        let state = read_state(folder.path());
+
+        for part_id in 0..10 {
+            let part = FilePartId::Part(part_id);
+
+            if !parts.contains(&part) {
+                assert_file_doesnt_exist(folder.path().join(format!("data/{part_id}.bin")));
+
+                assert!(
+                    !state.remaining_parts().iter().any(|p| p.part == part),
+                    "Part {:?} was found in the remaining parts",
+                    part
+                );
+            } else {
+                assert_file_exists_with_size(folder.path().join(format!("data/{part_id}.bin")), 10);
+
+                assert!(
+                    state.remaining_parts().iter().any(|p| p.part == part),
+                    "Part {:?} was not found in the remaining parts",
+                    part
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_splitting_after_acknowleding() -> anyhow::Result<()> {
+        let folder = TempDirProvider::new_test().create()?;
+        let mut file = make_test_managed_file(folder.path(), 100, 10)?;
+
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Part(9)))?;
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Part(7)))?;
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Part(8)))?;
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Part(0)))?;
+        file.acknowledge_file_part(FilePartIdRangeInclusive::new_single(FilePartId::Header))?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 6);
+
+        file.trigger_file_split()?;
+
+        let state = read_state(folder.path());
+        assert_eq!(state.remaining_parts().len(), 6);
+
+        assert_file_exists(folder.path().join("header.bin"));
+        assert_file_exists(folder.path().join("state.bin"));
+        for i in 1..6 {
+            assert_file_exists_with_size(folder.path().join(format!("data/{i}.bin")), 10);
+        }
+        for i in [0, 7, 8, 9].iter() {
+            assert_file_doesnt_exist(folder.path().join(format!("data/{i}.bin")));
+        }
+        assert_file_doesnt_exist(folder.path().join("data.bin"));
 
         Ok(())
     }

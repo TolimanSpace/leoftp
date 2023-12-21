@@ -103,6 +103,8 @@ pub struct FilePartIdRangeInclusive {
 
 impl FilePartIdRangeInclusive {
     pub fn new(from: FilePartId, to: FilePartId) -> Self {
+        assert!(from <= to);
+
         Self { from, to }
     }
 
@@ -112,6 +114,33 @@ impl FilePartIdRangeInclusive {
 
     pub fn contains(&self, id: FilePartId) -> bool {
         self.from <= id && id <= self.to
+    }
+
+    /// Iterate over all parts in the inclusive range. Header is the -1th part.
+    pub fn iter_parts(&self) -> impl Iterator<Item = FilePartId> {
+        let from = self.from;
+        let to = self.to;
+
+        let header_iter = std::iter::once_with(move || {
+            if from == FilePartId::Header {
+                Some(FilePartId::Header)
+            } else {
+                None
+            }
+        })
+        .flatten();
+
+        let remaining_iter_start = if let FilePartId::Part(i) = from { i } else { 0 };
+
+        let remaining_iter_end = if let FilePartId::Part(i) = to {
+            i + 1
+        } else {
+            0
+        };
+
+        let remaining_iter = (remaining_iter_start..remaining_iter_end).map(FilePartId::Part);
+
+        header_iter.chain(remaining_iter)
     }
 }
 
@@ -142,5 +171,49 @@ impl BinarySerialize for FilePartIdRangeInclusive {
 
     fn length_when_serialized(&self) -> u32 {
         8
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_file_part_id_range_inclusive_iter_parts() {
+        let range = FilePartIdRangeInclusive::new(FilePartId::Header, FilePartId::Part(3));
+        let parts: Vec<_> = range.iter_parts().collect();
+        assert_eq!(
+            parts,
+            vec![
+                FilePartId::Header,
+                FilePartId::Part(0),
+                FilePartId::Part(1),
+                FilePartId::Part(2),
+                FilePartId::Part(3)
+            ]
+        );
+
+        let range = FilePartIdRangeInclusive::new(FilePartId::Part(3), FilePartId::Part(3));
+        let parts: Vec<_> = range.iter_parts().collect();
+        assert_eq!(parts, vec![FilePartId::Part(3)]);
+
+        let range = FilePartIdRangeInclusive::new(FilePartId::Part(3), FilePartId::Part(5));
+        let parts: Vec<_> = range.iter_parts().collect();
+        assert_eq!(
+            parts,
+            vec![
+                FilePartId::Part(3),
+                FilePartId::Part(4),
+                FilePartId::Part(5)
+            ]
+        );
+
+        let range = FilePartIdRangeInclusive::new_single(FilePartId::Part(3));
+        let parts: Vec<_> = range.iter_parts().collect();
+        assert_eq!(parts, vec![FilePartId::Part(3)]);
+
+        let range = FilePartIdRangeInclusive::new_single(FilePartId::Header);
+        let parts: Vec<_> = range.iter_parts().collect();
+        assert_eq!(parts, vec![FilePartId::Header]);
     }
 }
