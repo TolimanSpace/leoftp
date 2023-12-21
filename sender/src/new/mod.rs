@@ -5,8 +5,8 @@ use crossbeam_channel::{Receiver, Sender};
 
 mod downlink_session;
 mod managed_file;
-mod tempdir;
 mod storage_manager;
+mod tempdir;
 
 pub struct DownlinkServer {
     files_dir: PathBuf,

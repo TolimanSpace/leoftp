@@ -1,13 +1,9 @@
-use std::collections::{BinaryHeap, HashMap};
+use std::collections::BinaryHeap;
 
-use common::{
-    chunks::Chunk,
-    control::ControlMessage,
-    file_part_id::{FilePartId, FilePartIdRangeInclusive},
-};
+use common::{chunks::Chunk, control::ControlMessage, file_part_id::FilePartId};
 use uuid::Uuid;
 
-use super::{managed_file::ManagedFile, storage_manager::StorageManager};
+use super::storage_manager::StorageManager;
 
 /// A single "downlink session". Sorts all chunks by priority and sends them all.
 /// When all chunks run out, the session ends. If more chunks still need to be sent,

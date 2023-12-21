@@ -335,7 +335,7 @@ impl ManagedFile {
             FilePartId::Header => {
                 let file_path = self.folder_path.join("header.bin");
                 let file = File::open(file_path)?;
-                let file_len = file.metadata()?.len() as usize;
+                let _file_len = file.metadata()?.len() as usize;
                 Ok(Some(Chunk::Header(self.header.clone())))
             }
             FilePartId::Part(part_id) => {

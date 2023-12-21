@@ -1,9 +1,6 @@
 use std::{collections::HashMap, path::PathBuf};
 
-use common::{
-    control::ControlMessage,
-    file_part_id::{FilePartId, FilePartIdRangeInclusive},
-};
+use common::{control::ControlMessage, file_part_id::FilePartIdRangeInclusive};
 use uuid::Uuid;
 
 use super::managed_file::ManagedFile;
