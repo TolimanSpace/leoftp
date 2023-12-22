@@ -4,6 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use chrono::{DateTime, Utc};
 use common::{
     binary_serialize::BinarySerialize,
     chunks::{Chunk, DataChunk, HeaderChunk},
@@ -104,11 +105,11 @@ pub struct ManagedFile {
 impl ManagedFile {
     /// Please reference the doc comment on [`ManagedFile`] for more information.
     pub fn create_new_from_header(
-        path: impl AsRef<Path>,
+        managed_file_destination_pat: impl AsRef<Path>,
         data_file_path: impl AsRef<Path>,
         header: HeaderChunk,
     ) -> anyhow::Result<Self> {
-        let path = path.as_ref();
+        let path = managed_file_destination_pat.as_ref();
         let data_file_path = data_file_path.as_ref();
         let mode = ManagedFileMode::Contiguous;
 
@@ -554,6 +555,51 @@ impl ManagedFile {
     pub fn header(&self) -> &HeaderChunk {
         &self.header
     }
+
+    pub fn calc_remaining_data_size(&self) -> u64 {
+        match self.mode {
+            ManagedFileMode::Contiguous => {
+                // Get the last unacknwoledged part index
+                let mut last_unacknowledged_part = None;
+                for part in self.state.remaining_parts().iter() {
+                    match part.part {
+                        FilePartId::Header => {}
+                        FilePartId::Part(i) => {
+                            if let Some(last) = last_unacknowledged_part {
+                                if i > last {
+                                    last_unacknowledged_part = Some(i);
+                                }
+                            } else {
+                                last_unacknowledged_part = Some(i);
+                            }
+                        }
+                    }
+                }
+
+                // Determine the resulting file size
+                if let Some(last) = last_unacknowledged_part {
+                    let part_size = self.header.file_part_size as u64;
+                    (last + 1) as u64 * part_size
+                } else {
+                    0
+                }
+            }
+            ManagedFileMode::Split => {
+                let mut result = 0;
+
+                for part in self.state.remaining_parts().iter() {
+                    match part.part {
+                        FilePartId::Header => {}
+                        FilePartId::Part(_) => {
+                            result += self.header.file_part_size as u64;
+                        }
+                    }
+                }
+
+                result
+            }
+        }
+    }
 }
 
 fn write_file_atomic(
@@ -575,6 +621,35 @@ fn write_file_atomic(
     std::fs::rename(&tmp_path, path)?;
 
     Ok(())
+}
+
+pub fn generate_file_header_from_path(path: &Path, file_part_size: u32) -> io::Result<HeaderChunk> {
+    let file = File::open(path)?;
+
+    let file_size = file.metadata()?.len();
+
+    let file_created_date = file.metadata()?.created()?;
+    // Convert SystemTime to DateTime<Utc>
+    let datetime: DateTime<Utc> = file_created_date.into();
+    // Format the datetime to number of nanoseconds since the unix epoch
+    let date = datetime.timestamp_nanos_opt().unwrap_or_default();
+
+    let part_count = if file_size % file_part_size as u64 == 0 {
+        file_size / file_part_size as u64
+    } else {
+        file_size / file_part_size as u64 + 1
+    };
+
+    let file_header = HeaderChunk {
+        id: uuid::Uuid::new_v4(),
+        name: path.file_name().unwrap().to_str().unwrap().to_string(),
+        date,
+        size: file_size,
+        part_count: part_count as u32,
+        file_part_size,
+    };
+
+    Ok(file_header)
 }
 
 #[cfg(test)]

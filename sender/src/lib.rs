@@ -12,9 +12,10 @@ use crossbeam_channel::{Receiver, RecvError, SendError, Sender};
 use input_folder::InputFolderThreads;
 use ready_folder::ReadyFolderThreads;
 mod input_folder;
-mod new;
 mod ready_file;
 mod ready_folder;
+
+pub mod new;
 
 // Procedure:
 // 1. Service creates a new file in the input folder. The file is valid as long as it has no other file handles using it.

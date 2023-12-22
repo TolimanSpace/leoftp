@@ -1,37 +1,30 @@
-use std::collections::BinaryHeap;
-
 use common::{chunks::Chunk, control::ControlMessage, file_part_id::FilePartId};
-use uuid::Uuid;
 
-use super::storage_manager::StorageManager;
+use super::storage_manager::{StorageFilePart, StorageManager};
 
 /// A single "downlink session". Sorts all chunks by priority and sends them all.
-/// When all chunks run out, the session ends. If more chunks still need to be sent,
-/// a new session should be created. The downlink session can only reduce data used
-/// by the service, it can't add new files. Adding new files is handled by the
-/// StorageManager outside of downlink sessions.
+/// Once all chunks are sent, it loops from the start. The downlink session can only
+/// reduce data used by the service, it can't add new files. Adding new files is
+/// handled by the StorageManager outside of downlink sessions.
 pub struct DownlinkSession {
     storage: StorageManager,
-    parts_queue: BinaryHeap<DownlinkSessionItem>,
+    parts_queue: Vec<StorageFilePart>,
+    parts_queue_index: usize,
 }
 
 impl DownlinkSession {
     pub fn new(storage: StorageManager) -> Self {
-        let mut parts_queue = BinaryHeap::new();
+        let mut parts_queue = storage
+            .iter_remaining_storage_file_parts()
+            .collect::<Vec<_>>();
 
-        for file in storage.iter_files() {
-            for part in file.remaining_parts() {
-                parts_queue.push(DownlinkSessionItem {
-                    file_id: file.header().id,
-                    part_id: part.part,
-                    priority: part.priority,
-                });
-            }
-        }
+        // Sort from highest priority to lowest, we will index from the start and increment up.
+        parts_queue.sort_unstable_by(|a, b| b.cmp(a));
 
         Self {
             storage,
             parts_queue,
+            parts_queue_index: 0,
         }
     }
 
@@ -39,12 +32,32 @@ impl DownlinkSession {
         self.storage.process_control(control)
     }
 
+    fn next_item(&mut self) -> Option<StorageFilePart> {
+        if self.parts_queue.is_empty() {
+            return None;
+        }
+
+        let item = self.parts_queue[self.parts_queue_index].clone();
+        self.parts_queue_index += 1;
+        if self.parts_queue_index >= self.parts_queue.len() {
+            self.parts_queue_index = 0;
+        }
+
+        Some(item)
+    }
+
     pub fn next_chunk(&mut self) -> anyhow::Result<Option<Chunk>> {
+        let start_index = self.parts_queue_index;
         loop {
-            let item = self.parts_queue.pop();
+            let item = self.next_item();
             let Some(item) = item else {
                 return Ok(None);
             };
+
+            if self.parts_queue_index == start_index {
+                // We looped around, no more items
+                return Ok(None);
+            }
 
             let file = &mut self.storage.get_file(item.file_id);
             let Some(file) = file else {
@@ -68,68 +81,15 @@ impl DownlinkSession {
 
     /// Confirms that a file has been sent, decreasing its priority. Not to be confused
     /// with acknowleding files, which deletes their parts.
-    pub fn confirm_file_sent(&mut self, file_id: uuid::Uuid) -> anyhow::Result<()> {
-        let file = self.storage.get_file_mut(file_id);
-
-        let Some(file) = file else {
-            tracing::info!(
-                "Received sent confirmation for non-existent file: {}",
-                file_id
-            );
-            return Ok(());
-        };
-
-        file.decrease_part_priority(FilePartId::Header)?;
-
-        Ok(())
+    pub fn confirm_file_sent(
+        &mut self,
+        file_id: uuid::Uuid,
+        part_id: FilePartId,
+    ) -> anyhow::Result<()> {
+        self.storage.confirm_file_sent(file_id, part_id)
     }
-}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct DownlinkSessionItem {
-    file_id: Uuid,
-
-    part_id: FilePartId,
-    priority: i16,
-}
-
-impl std::cmp::Ord for DownlinkSessionItem {
-    #[allow(clippy::comparison_chain)]
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let a = self;
-        let b = other;
-
-        // Sort by priority first. Higher priority gets higher precedence.
-        if a.priority > b.priority {
-            return std::cmp::Ordering::Greater;
-        } else if a.priority < b.priority {
-            return std::cmp::Ordering::Less;
-        }
-
-        // Sort by header parts next. Headers always get highest priority.
-        let a_header = a.part_id == FilePartId::Header;
-        let b_header = b.part_id == FilePartId::Header;
-        if a_header && !b_header {
-            return std::cmp::Ordering::Greater;
-        } else if !a_header && b_header {
-            return std::cmp::Ordering::Less;
-        }
-
-        // Then, sort by part number. Higher part numbers get higher precedence.
-        let a_part = match a.part_id {
-            FilePartId::Part(part) => part,
-            FilePartId::Header => 0,
-        };
-        let b_part = match b.part_id {
-            FilePartId::Part(part) => part,
-            FilePartId::Header => 0,
-        };
-        a_part.cmp(&b_part)
-    }
-}
-
-impl std::cmp::PartialOrd for DownlinkSessionItem {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
+    pub fn into_storage_manager(self) -> StorageManager {
+        self.storage
     }
 }

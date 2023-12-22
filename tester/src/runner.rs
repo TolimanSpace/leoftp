@@ -8,6 +8,7 @@ use common::{
     binary_serialize::BinarySerialize,
     transport_packet::{parse_transport_packet_stream, TransportPacket, TransportPacketData},
 };
+use sender::new::DownlinkServer;
 
 use crate::byte_pipe::make_corrupt_pipe;
 
@@ -29,13 +30,9 @@ impl TestRunner {
         let rcv_pending_folder = rcv_folder.join("pending");
         let rcv_finished_folder = rcv_folder.join("finished");
 
-        // Spawn the sender and receiver
-        let snd_file_server = sender::FileServer::spawn_with_part_size(
-            snd_input_folder.clone(),
-            snd_workdir_folder,
-            1048576,
-        )
-        .unwrap();
+        let mut downlink =
+            DownlinkServer::spawn(snd_input_folder.clone(), snd_workdir_folder, 1024 * 64).unwrap();
+
         let mut rcv_file_server =
             receiver::Reciever::new(rcv_pending_folder, rcv_finished_folder.clone()).unwrap();
 
@@ -45,6 +42,8 @@ impl TestRunner {
 
         let (mut chunks_snd, chunks_rcv) = make_corrupt_pipe(corrupt_freq, kill_flag.clone());
         let (mut control_snd, control_rcv) = make_corrupt_pipe(corrupt_freq, kill_flag.clone());
+
+        downlink.add_control_message_reader(control_rcv);
 
         let rcv_join = std::thread::spawn(move || {
             let control_interval = 50;
@@ -77,28 +76,24 @@ impl TestRunner {
             tracing::info!("Receiver thread finished");
         });
 
-        let chunk_snd_server = snd_file_server.clone();
         let chunk_sender = std::thread::spawn(move || loop {
-            let chunk = chunk_snd_server.get_chunk().unwrap();
-            let packet = TransportPacket::new(TransportPacketData::from_chunk(chunk));
-            packet.serialize_to_stream(&mut chunks_snd).unwrap();
-        });
+            let session = downlink.begin_downlink_session().unwrap();
 
-        let control_snd_server = snd_file_server.clone();
-        let control_receiver = std::thread::spawn(move || {
-            let stream = parse_transport_packet_stream(control_rcv);
-            for packet in stream {
-                let packet = packet.unwrap();
-                let control = packet
-                    .as_control_message()
-                    .expect("Expected control message");
+            // Downlink sessions last 100 packets
+            for _ in 0..100 {
+                let packet = session.next_transport_packet().unwrap();
+                let Some(packet) = packet else {
+                    break;
+                };
 
-                tracing::info!("Received control message: {}", control);
-
-                control_snd_server.send_control_msg(control).unwrap();
+                packet.serialize_to_stream(&mut chunks_snd).unwrap();
             }
 
-            tracing::info!("Control receiver thread finished");
+            // End the session
+            drop(session);
+
+            // Wait 500ms
+            std::thread::sleep(std::time::Duration::from_millis(500));
         });
 
         let join_handle = std::thread::spawn(move || {
@@ -108,18 +103,10 @@ impl TestRunner {
                     tracing::error!("chunk sender thread: {:?}", e.downcast_ref::<String>())
                 })
                 .ok();
-            control_receiver
-                .join()
-                .map_err(|e| {
-                    tracing::error!("control rcv thread: {:?}", e.downcast_ref::<String>())
-                })
-                .ok();
             rcv_join
                 .join()
                 .map_err(|e| tracing::error!("rcv join thread: {:?}", e.downcast_ref::<String>()))
                 .ok();
-
-            snd_file_server.join();
 
             tracing::info!("Sender thread finished");
         });

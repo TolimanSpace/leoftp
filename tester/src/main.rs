@@ -9,7 +9,7 @@ pub fn main() {
         .compact()
         .init();
 
-    let base_folder = PathBuf::from("./testdata");
+    let base_folder = PathBuf::from("/home/arduano/programming/spiralblue/file-downlink/testdata");
 
     let _runner = runner::TestRunner::new(&base_folder);
 

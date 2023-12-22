@@ -9,7 +9,7 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 while true; do
-    ./target/debug/tester &
+    ./target/release/tester &
     PID=$!
 
     # Sleep for 2 seconds
