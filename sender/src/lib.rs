@@ -1,108 +1,200 @@
-use std::{
-    io,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use std::{io::Read, path::PathBuf, thread::JoinHandle};
 
+use anyhow::Context;
 use common::{
-    chunks::{Chunk, DataChunk},
-    control::ControlMessage,
+    chunks::Chunk,
+    transport_packet::{parse_transport_packet_stream, TransportPacket, TransportPacketData},
 };
-use crossbeam_channel::{Receiver, RecvError, SendError, Sender};
-use input_folder::InputFolderThreads;
-use ready_folder::ReadyFolderThreads;
-mod input_folder;
-mod ready_file;
-mod ready_folder;
+use crossbeam_channel::{Receiver, Sender};
 
-pub mod new;
+use self::background_runner::{run_downlink_server_bg_runner, DownlinkServerMessage};
 
-// Procedure:
-// 1. Service creates a new file in the input folder. The file is valid as long as it has no other file handles using it.
-// 2. Sender moves the file to the pending folder. While in the pending folder, it determines any relevant metadata.
-// 3. Sender creates a folder in the ready folder with the same name as the file. The file gets moved in, along with a json file that represents the file's metadata.
-// 4. File parts are sent to the radio, including the file header/metadata
-// 5. Whenever we get a confirmation that a file part has been successfuly sent, we remove it from the ready folder.
+mod background_runner;
+mod downlink_session;
+mod managed_file;
+mod storage_manager;
+mod tempdir;
 
-const DEFAULT_FILE_PART_SIZE: u32 = 1024 * 64; // 64kb
-
-struct FileServerInner {
-    input_folder: InputFolderThreads,
-    ready_folder: ReadyFolderThreads,
+pub struct DownlinkServer {
+    background_runner_messages: Sender<DownlinkServerMessage>,
+    join_handles: Vec<JoinHandle<()>>,
 }
 
-/// The file server. It automatically has a queue of chunks to send, and a queue of confirmations to process.
-#[derive(Clone)]
-pub struct FileServer {
-    inner: Arc<Mutex<Option<FileServerInner>>>,
-    chunks_rcv: Receiver<Chunk>,
-    control_snd: Sender<ControlMessage>,
-}
-
-impl FileServer {
-    pub fn spawn(input_folder: PathBuf, workdir: PathBuf) -> io::Result<Self> {
-        Self::spawn_with_part_size(input_folder, workdir, DEFAULT_FILE_PART_SIZE)
-    }
-
-    pub fn spawn_with_part_size(
+impl DownlinkServer {
+    pub fn spawn(
         input_folder: PathBuf,
         workdir: PathBuf,
-        file_part_size: u32,
-    ) -> io::Result<Self> {
-        assert!(file_part_size > 0);
-        assert!(file_part_size < DataChunk::MAX_CHUNK_LENGTH as u32);
-
-        let (new_file_snd, new_file_rcv) = crossbeam_channel::unbounded();
-        let (control_snd, control_rcv) = crossbeam_channel::unbounded();
-
-        // We need to make sure chunks is bounded, so it doesn't overflow memory
-        let (chunks_snd, chunks_rcv) = crossbeam_channel::bounded(10);
+        new_file_chunk_size: u32,
+    ) -> anyhow::Result<Self> {
+        let (message_snd, message_rcv) = crossbeam_channel::unbounded();
 
         let pending_folder = workdir.join("pending");
         let ready_folder = workdir.join("ready");
 
-        // Ensure that the folders exist
-        std::fs::create_dir_all(&input_folder)?;
-        std::fs::create_dir_all(&pending_folder)?;
-        std::fs::create_dir_all(&ready_folder)?;
+        let poller_join_handle =
+            spawn_file_poller(input_folder, pending_folder, message_snd.clone())
+                .context("Failed to spawn file poller")?;
 
-        Ok(FileServer {
-            inner: Arc::new(Mutex::new(Some(FileServerInner {
-                input_folder: InputFolderThreads::spawn(
-                    input_folder,
-                    pending_folder,
-                    new_file_snd,
-                )?,
-                ready_folder: ReadyFolderThreads::spawn(
-                    ready_folder,
-                    new_file_rcv,
-                    chunks_snd,
-                    control_rcv,
-                    file_part_size,
-                ),
-            }))),
+        let server_join_handle =
+            run_downlink_server_bg_runner(ready_folder, message_rcv, new_file_chunk_size)?;
 
-            chunks_rcv,
-            control_snd,
+        Ok(Self {
+            background_runner_messages: message_snd,
+            join_handles: vec![server_join_handle, poller_join_handle],
         })
     }
 
-    pub fn get_chunk(&self) -> Result<Chunk, RecvError> {
-        self.chunks_rcv.recv()
+    pub fn add_control_message_reader(&mut self, reader: impl 'static + Read + Send) {
+        let handle = spawn_control_reader(reader, self.background_runner_messages.clone());
+        self.join_handles.push(handle);
     }
 
-    pub fn send_control_msg(
-        &self,
-        control: ControlMessage,
-    ) -> Result<(), SendError<ControlMessage>> {
-        self.control_snd.send(control)
+    pub fn begin_downlink_session(&self) -> anyhow::Result<DownlinkReader> {
+        let (chunk_snd, chunk_rcv) = crossbeam_channel::bounded(3);
+
+        let message = DownlinkServerMessage::BeginDownlinkSession(chunk_snd);
+        self.background_runner_messages.send(message).context("Failed to notify background runner that a downlink started. The background runner is probably dead.")?;
+
+        Ok(DownlinkReader {
+            background_runner_messages: self.background_runner_messages.clone(),
+            chunks: chunk_rcv,
+        })
     }
 
-    pub fn join(self) {
-        let inner = self.inner.lock().unwrap().take().unwrap();
+    pub fn join(mut self) {
+        self.background_runner_messages
+            .send(DownlinkServerMessage::StopAndQuit)
+            .ok();
 
-        // Then join the threads
-        inner.input_folder.join();
-        inner.ready_folder.join();
+        for handle in self.join_handles.drain(..) {
+            handle.join().ok();
+        }
     }
+}
+
+impl Drop for DownlinkServer {
+    fn drop(&mut self) {
+        self.background_runner_messages
+            .send(DownlinkServerMessage::StopAndQuit)
+            .ok();
+
+        // Simply kill the server, don't join because dropping shouldn't block
+    }
+}
+
+/// The downlink reader. Provides a stream of chunks. The session ends
+/// when the reader is dropped.
+pub struct DownlinkReader {
+    background_runner_messages: Sender<DownlinkServerMessage>,
+    chunks: Receiver<Option<Chunk>>,
+}
+
+impl DownlinkReader {
+    pub fn next_transport_packet(&self) -> anyhow::Result<Option<TransportPacket>> {
+        let next_chunk = self
+            .chunks
+            .recv()
+            .context("Failed to receive next chunk. The background server is probably dead.")?;
+
+        let Some(next_chunk) = next_chunk else {
+            return Ok(None);
+        };
+
+        let ack = DownlinkServerMessage::ConfirmChunkSent {
+            file_id: next_chunk.file_id(),
+            part_id: next_chunk.part_index(),
+        };
+        self.background_runner_messages
+            .send(ack)
+            .context("Failed to send ack. The background server is probably dead.")?;
+
+        Ok(Some(TransportPacket::new(TransportPacketData::from_chunk(
+            next_chunk,
+        ))))
+    }
+}
+
+fn spawn_control_reader(
+    control_reader: impl 'static + Read + Send,
+    control_snd: Sender<DownlinkServerMessage>,
+) -> JoinHandle<()> {
+    std::thread::spawn(move || {
+        let control_parser = parse_transport_packet_stream(control_reader);
+
+        for packet in control_parser {
+            let packet = match packet {
+                Ok(packet) => packet,
+                Err(err) => {
+                    tracing::error!("Error parsing control packet: {}", err);
+                    continue;
+                }
+            };
+
+            let control = packet.as_control_message();
+            let Some(control) = control else {
+                tracing::error!("Received non-control packet in control stream");
+                continue;
+            };
+
+            let send_result = control_snd.send(DownlinkServerMessage::Control(control));
+            if send_result.is_err() {
+                // If the receiver is gone, we can just stop reading
+                tracing::info!("Control message receiver disconnected");
+                return;
+            }
+        }
+    })
+}
+
+pub fn spawn_file_poller(
+    input_folder: PathBuf,
+    pending_folder: PathBuf,
+    new_file_snd: Sender<DownlinkServerMessage>,
+) -> anyhow::Result<JoinHandle<()>> {
+    // Add all the files that are already in the pending folder to the queue
+    for entry in std::fs::read_dir(&pending_folder)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_file() {
+            new_file_snd
+                .send(DownlinkServerMessage::AddFile(path))
+                .context("Failed to add file to queue when spawning poller")?;
+        }
+    }
+
+    // Spawn a thread that polls the new folder, and moves each file there into the pending folder and
+    // notifies the pending queue
+    let join = std::thread::spawn(move || loop {
+        // Find all the new foles in the new folder
+        let mut new_files = Vec::new();
+        for entry in std::fs::read_dir(&input_folder).unwrap() {
+            // Ensure that the file no longer has open file handles
+
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_file() {
+                new_files.push(path);
+            }
+        }
+
+        for path in new_files {
+            let pending_path = pending_folder.join(path.file_name().unwrap());
+
+            let rename_result = std::fs::rename(&path, &pending_path);
+            if rename_result.is_err() {
+                tracing::error!("Failed to move file to pending folder: {:?}", rename_result);
+                continue;
+            }
+
+            let snd_result = new_file_snd.send(DownlinkServerMessage::AddFile(pending_path));
+            if snd_result.is_err() {
+                return; // The queue has been removed
+            }
+        }
+
+        // Sleep to not spam the disk too much
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    });
+
+    Ok(join)
 }

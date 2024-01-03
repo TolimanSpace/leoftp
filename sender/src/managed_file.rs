@@ -655,7 +655,7 @@ pub fn generate_file_header_from_path(path: &Path, file_part_size: u32) -> io::R
 #[cfg(test)]
 mod tests {
     use super::{state::ManagedFileState, *};
-    use crate::new::tempdir::{TempDir, TempDirProvider};
+    use crate::tempdir::{TempDir, TempDirProvider};
 
     struct DummyFile {
         _folder: TempDir,

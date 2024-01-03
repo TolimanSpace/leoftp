@@ -205,8 +205,7 @@ fn deserialize_parts_from_file(reader: &mut File) -> std::io::Result<Vec<Managed
 
 #[cfg(test)]
 mod tests {
-
-    use crate::new::tempdir::TempDirProvider;
+    use crate::tempdir::TempDirProvider;
 
     use super::*;
 

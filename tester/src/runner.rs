@@ -8,7 +8,7 @@ use common::{
     binary_serialize::BinarySerialize,
     transport_packet::{parse_transport_packet_stream, TransportPacket, TransportPacketData},
 };
-use sender::new::DownlinkServer;
+use sender::DownlinkServer;
 
 use crate::byte_pipe::make_corrupt_pipe;
 
