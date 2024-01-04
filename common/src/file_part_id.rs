@@ -86,12 +86,7 @@ impl PartialOrd for FilePartId {
 
 impl Ord for FilePartId {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match (self, other) {
-            (FilePartId::Header, FilePartId::Header) => std::cmp::Ordering::Equal,
-            (FilePartId::Header, FilePartId::Part(_)) => std::cmp::Ordering::Less,
-            (FilePartId::Part(_), FilePartId::Header) => std::cmp::Ordering::Greater,
-            (FilePartId::Part(i), FilePartId::Part(j)) => i.cmp(j),
-        }
+        self.to_index().cmp(&other.to_index())
     }
 }
 
