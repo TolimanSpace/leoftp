@@ -249,43 +249,11 @@ pub struct StorageFilePart {
     pub priority: i16,
 }
 
-impl std::cmp::Ord for StorageFilePart {
-    #[allow(clippy::comparison_chain)]
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        let a = self;
-        let b = other;
-
-        // Sort by priority first. Higher priority gets higher precedence.
-        if a.priority > b.priority {
-            return std::cmp::Ordering::Greater;
-        } else if a.priority < b.priority {
-            return std::cmp::Ordering::Less;
-        }
-
-        // Sort by header parts next. Headers always get highest priority.
-        let a_header = a.part_id == FilePartId::Header;
-        let b_header = b.part_id == FilePartId::Header;
-        if a_header && !b_header {
-            return std::cmp::Ordering::Greater;
-        } else if !a_header && b_header {
-            return std::cmp::Ordering::Less;
-        }
-
-        // Then, sort by part number. Higher part numbers get higher precedence.
-        let a_part = match a.part_id {
-            FilePartId::Part(part) => part,
-            FilePartId::Header => 0,
-        };
-        let b_part = match b.part_id {
-            FilePartId::Part(part) => part,
-            FilePartId::Header => 0,
-        };
-        a_part.cmp(&b_part)
-    }
-}
-
 #[allow(clippy::comparison_chain)]
-fn cmp_file_storage_part_normal(a: &StorageFilePart, b: &StorageFilePart) -> std::cmp::Ordering {
+pub fn cmp_file_storage_part_normal(
+    a: &StorageFilePart,
+    b: &StorageFilePart,
+) -> std::cmp::Ordering {
     // Sort by priority first. Higher priority gets higher precedence.
     if a.priority > b.priority {
         return std::cmp::Ordering::Greater;
@@ -346,12 +314,6 @@ pub fn cmp_file_storage_part_for_deletion(
         FilePartId::Header => u32::MAX,
     };
     b_part.cmp(&a_part)
-}
-
-impl std::cmp::PartialOrd for StorageFilePart {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 #[cfg(test)]

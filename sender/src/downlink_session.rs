@@ -1,5 +1,7 @@
 use common::{chunks::Chunk, control::ControlMessage, file_part_id::FilePartId};
 
+use crate::storage_manager::cmp_file_storage_part_normal;
+
 use super::storage_manager::{StorageFilePart, StorageManager};
 
 /// A single "downlink session". Sorts all chunks by priority and sends them all.
@@ -19,7 +21,7 @@ impl DownlinkSession {
             .collect::<Vec<_>>();
 
         // Sort from highest priority to lowest, we will index from the start and increment up.
-        parts_queue.sort_unstable_by(|a, b| b.cmp(a));
+        parts_queue.sort_unstable_by(|a, b| cmp_file_storage_part_normal(b, a));
 
         Self {
             storage,

@@ -8,6 +8,8 @@ use crate::transport_packet::scrambling::UnscramblingReader;
 use super::TransportPacketData;
 use super::{checkpoint_stream::StreamWithCheckpoints, TransportPacket};
 
+#[allow(dead_code)]
+/// Debug print the contents of the stream. Only used for debugging tests, but helpful to leave in the codebase.
 pub fn debug_stream(stream: &mut StreamWithCheckpoints<impl Read>, len: usize) {
     let mut buf = vec![0u8; len];
     stream.read_exact(&mut buf).unwrap();

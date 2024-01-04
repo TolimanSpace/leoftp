@@ -42,9 +42,7 @@ impl ManagedFileState {
         }
 
         let path = result_path.into();
-        write_file_atomic(&path, |stream| {
-            Ok(serialize_parts_to_stream(&parts, stream)?)
-        })?;
+        write_file_atomic(&path, |stream| serialize_parts_to_stream(&parts, stream))?;
 
         Ok(Self {
             inner_file: path,
@@ -114,7 +112,7 @@ impl ManagedFileState {
         }
 
         write_file_atomic(&self.inner_file, |stream| {
-            Ok(serialize_parts_to_stream(&self.remaining_parts, stream)?)
+            serialize_parts_to_stream(&self.remaining_parts, stream)
         })?;
 
         Ok(())
@@ -127,7 +125,7 @@ impl ManagedFileState {
         self.remaining_parts.retain(predicate);
 
         write_file_atomic(&self.inner_file, |stream| {
-            Ok(serialize_parts_to_stream(&self.remaining_parts, stream)?)
+            serialize_parts_to_stream(&self.remaining_parts, stream)
         })?;
 
         Ok(())
@@ -166,9 +164,9 @@ fn serialize_part_to_stream(
 fn serialize_parts_to_stream(
     parts: &[ManagedFileStatePart],
     writer: &mut impl std::io::Write,
-) -> std::io::Result<()> {
+) -> anyhow::Result<()> {
     for part in parts {
-        serialize_part_to_stream(part, writer);
+        serialize_part_to_stream(part, writer)?;
     }
 
     Ok(())

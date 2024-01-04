@@ -65,14 +65,17 @@ impl<R: Read> StreamWithCheckpoints<R> {
         self.prev_data_pos -= n;
     }
 
+    #[allow(dead_code)]
     pub fn rollback_len(&self) -> usize {
         self.prev_data_pos
     }
 
+    #[allow(dead_code)]
     pub fn cached_len(&self) -> usize {
         self.prev_data.len() - self.prev_data_pos
     }
 
+    #[allow(dead_code)]
     pub fn remaining_cached_len(&self) -> usize {
         self.prev_data.len() - self.prev_data_pos
     }

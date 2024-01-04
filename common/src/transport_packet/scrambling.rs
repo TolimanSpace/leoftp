@@ -7,10 +7,6 @@ impl<W: std::io::Write> ScramblingWriter<W> {
     pub fn new(writer: W) -> Self {
         Self { writer, cum_sum: 0 }
     }
-
-    pub fn inner(self) -> W {
-        self.writer
-    }
 }
 
 impl<W: std::io::Write> std::io::Write for ScramblingWriter<W> {
@@ -38,10 +34,6 @@ pub struct UnscramblingReader<R: std::io::Read> {
 impl<R: std::io::Read> UnscramblingReader<R> {
     pub fn new(reader: R) -> Self {
         Self { reader, cum_sum: 0 }
-    }
-
-    pub fn inner(self) -> R {
-        self.reader
     }
 }
 
