@@ -129,6 +129,9 @@ impl BinarySerialize for TransportPacketData {
             129 => TransportPacketData::DeleteFile(
                 crate::control::DeleteFile::deserialize_from_stream(reader)?,
             ),
+            130 => TransportPacketData::SetFilePriority(
+                crate::control::SetFilePriority::deserialize_from_stream(reader)?,
+            ),
             _ => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,

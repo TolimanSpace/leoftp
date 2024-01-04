@@ -10,6 +10,7 @@ fuzz_target!(|data: ControlMessage| {
     match data {
         ControlMessage::ConfirmPart(confirm_part) => check_message(confirm_part),
         ControlMessage::DeleteFile(delete_file) => check_message(delete_file),
+        ControlMessage::SetFilePriority(set_priority) => check_message(set_priority),
     }
 });
 

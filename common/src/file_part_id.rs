@@ -33,16 +33,16 @@ impl FilePartId {
 
     pub fn to_index(&self) -> u32 {
         match self {
-            FilePartId::Header => u32::MAX,
-            FilePartId::Part(i) => *i,
+            FilePartId::Header => 0,
+            FilePartId::Part(i) => *i + 1,
         }
     }
 
     pub fn from_index(i: u32) -> Self {
-        if i == u32::MAX {
+        if i == 0 {
             FilePartId::Header
         } else {
-            FilePartId::Part(i)
+            FilePartId::Part(i - 1)
         }
     }
 }
@@ -118,29 +118,10 @@ impl FilePartIdRangeInclusive {
 
     /// Iterate over all parts in the inclusive range. Header is the -1th part.
     pub fn iter_parts(&self) -> impl Iterator<Item = FilePartId> {
-        let from = self.from;
-        let to = self.to;
+        let from_index = self.from.to_index();
+        let to_index = self.to.to_index();
 
-        let header_iter = std::iter::once_with(move || {
-            if from == FilePartId::Header {
-                Some(FilePartId::Header)
-            } else {
-                None
-            }
-        })
-        .flatten();
-
-        let remaining_iter_start = if let FilePartId::Part(i) = from { i } else { 0 };
-
-        let remaining_iter_end = if let FilePartId::Part(i) = to {
-            i + 1
-        } else {
-            0
-        };
-
-        let remaining_iter = (remaining_iter_start..remaining_iter_end).map(FilePartId::Part);
-
-        header_iter.chain(remaining_iter)
+        (from_index..=to_index).map(FilePartId::from_index)
     }
 }
 
