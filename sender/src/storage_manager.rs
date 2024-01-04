@@ -94,16 +94,7 @@ impl StorageManager {
             }
             ControlMessage::DeleteFile(delete) => {
                 let file_id = delete.file_id;
-
-                let file = self.files.remove(&file_id);
-
-                let Some(file) = file else {
-                    tracing::info!("Received delete request for non-existent file: {}", file_id);
-                    return Ok(());
-                };
-
-                file.delete()?;
-
+                self.delete_file_by_id(file_id)?;
                 Ok(())
             }
         }
