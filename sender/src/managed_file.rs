@@ -1,6 +1,6 @@
 use std::{
     fs::{File, OpenOptions},
-    io::{self, BufWriter, Read, Seek, Write},
+    io::{self, BufWriter, Seek, Write},
     path::{Path, PathBuf},
 };
 
@@ -130,7 +130,7 @@ impl ManagedFile {
         })?;
 
         let state_path = path.join("state.bin");
-        let state = ManagedFileState::new_from_part_count(header.part_count, &state_path)?;
+        let state = ManagedFileState::new_from_part_count(header.part_count, state_path)?;
 
         // 4. Move in the data.bin file
         std::fs::rename(data_file_path, path.join("data.bin"))?;
@@ -462,21 +462,7 @@ impl ManagedFile {
         match self.mode {
             ManagedFileMode::Contiguous => {
                 // Find the last part number that's unacknowledged
-                let mut last_unacknowledged_part = None;
-                for part in self.state.remaining_parts().iter() {
-                    match part.part {
-                        FilePartId::Header => {}
-                        FilePartId::Part(i) => {
-                            if let Some(last) = last_unacknowledged_part {
-                                if i > last {
-                                    last_unacknowledged_part = Some(i);
-                                }
-                            } else {
-                                last_unacknowledged_part = Some(i);
-                            }
-                        }
-                    }
-                }
+                let last_unacknowledged_part = self.get_last_unacknowledged_data_chunk_index();
 
                 // Open the file
                 let file = OpenOptions::new()
@@ -529,12 +515,12 @@ impl ManagedFile {
         Ok(())
     }
 
-    fn is_finished(&self) -> bool {
+    pub fn is_finished(&self) -> bool {
         self.state.remaining_parts().is_empty()
     }
 
     pub fn delete(self) -> anyhow::Result<()> {
-        std::fs::remove_dir_all(&self.folder_path)?;
+        std::fs::remove_dir_all(self.folder_path)?;
         Ok(())
     }
 
@@ -556,25 +542,38 @@ impl ManagedFile {
         &self.header
     }
 
+    fn get_last_unacknowledged_data_chunk_index(&self) -> Option<u32> {
+        let mut last_unacknowledged_part = None;
+        for part in self.state.remaining_parts().iter() {
+            match part.part {
+                FilePartId::Header => {}
+                FilePartId::Part(i) => {
+                    if let Some(last) = last_unacknowledged_part {
+                        if i > last {
+                            last_unacknowledged_part = Some(i);
+                        }
+                    } else {
+                        last_unacknowledged_part = Some(i);
+                    }
+                }
+            }
+        }
+
+        last_unacknowledged_part
+    }
+
+    fn get_remaining_data_part_count(&self) -> u32 {
+        self.remaining_parts()
+            .iter()
+            .filter(|part| part.part != FilePartId::Header)
+            .count() as u32
+    }
+
     pub fn calc_remaining_data_size(&self) -> u64 {
         match self.mode {
             ManagedFileMode::Contiguous => {
                 // Get the last unacknwoledged part index
-                let mut last_unacknowledged_part = None;
-                for part in self.state.remaining_parts().iter() {
-                    match part.part {
-                        FilePartId::Header => {}
-                        FilePartId::Part(i) => {
-                            if let Some(last) = last_unacknowledged_part {
-                                if i > last {
-                                    last_unacknowledged_part = Some(i);
-                                }
-                            } else {
-                                last_unacknowledged_part = Some(i);
-                            }
-                        }
-                    }
-                }
+                let last_unacknowledged_part = self.get_last_unacknowledged_data_chunk_index();
 
                 // Determine the resulting file size
                 if let Some(last) = last_unacknowledged_part {
@@ -599,6 +598,20 @@ impl ManagedFile {
                 result
             }
         }
+    }
+
+    pub fn chunks_saved_by_splitting(&self) -> u32 {
+        if self.mode == ManagedFileMode::Split {
+            return 0;
+        }
+
+        let Some(last) = self.get_last_unacknowledged_data_chunk_index() else {
+            return 0;
+        };
+
+        let total = self.get_remaining_data_part_count();
+
+        (last + 1) - total
     }
 }
 

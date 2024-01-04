@@ -9,6 +9,8 @@ use common::{chunks::Chunk, control::ControlMessage, file_part_id::FilePartId};
 use crossbeam_channel::{Receiver, SendTimeoutError, Sender};
 use uuid::Uuid;
 
+use crate::storage_manager::StorageManagerConfig;
+
 use super::{downlink_session::DownlinkSession, storage_manager::StorageManager};
 
 pub enum DownlinkServerMessage {
@@ -42,18 +44,12 @@ struct BackgroundRunnerWaitingState {
     storage: StorageManager,
 }
 
-/// The possible states that the background runner can be in.
-enum BackgroundRunnerState {
-    DownlinkSession(BackgroundRunnerDownlinkSessionState),
-    Waiting(BackgroundRunnerWaitingState),
-}
-
 pub fn run_downlink_server_bg_runner(
     files_dir: PathBuf,
     message_rcv: Receiver<DownlinkServerMessage>,
-    new_file_chunk_size: u32,
+    storage_config: StorageManagerConfig,
 ) -> anyhow::Result<JoinHandle<()>> {
-    let storage = StorageManager::new(files_dir.clone(), new_file_chunk_size)
+    let storage = StorageManager::new(files_dir.clone(), storage_config)
         .context("Failed to load storage when initializing downlink background runner")?;
 
     let mut prev_waiting_state = BackgroundRunnerWaitingState { storage };
@@ -212,7 +208,10 @@ impl BackgroundRunnerWaitingState {
                         }
                     }
                     DownlinkServerMessage::ConfirmChunkSent { file_id, part_id } => {
-                        self.storage.confirm_file_sent(file_id, part_id);
+                        let result = self.storage.confirm_file_sent(file_id, part_id);
+                        if let Err(err) = result {
+                            tracing::error!("Error marking file part as sent. File ID: {}\nPart ID: {}\nError: {}", file_id, part_id, err);
+                        }
                     }
                     DownlinkServerMessage::AddFile(path) => {
                         let add_result = self.storage.add_file_from_path(&path);

@@ -8,7 +8,7 @@ use common::{
     binary_serialize::BinarySerialize,
     transport_packet::{parse_transport_packet_stream, TransportPacket, TransportPacketData},
 };
-use sender::DownlinkServer;
+use sender::{DownlinkServer, StorageManagerConfig};
 
 use crate::byte_pipe::make_corrupt_pipe;
 
@@ -30,8 +30,16 @@ impl TestRunner {
         let rcv_pending_folder = rcv_folder.join("pending");
         let rcv_finished_folder = rcv_folder.join("finished");
 
-        let mut downlink =
-            DownlinkServer::spawn(snd_input_folder.clone(), snd_workdir_folder, 1024 * 64).unwrap();
+        let mut downlink = DownlinkServer::spawn(
+            snd_input_folder.clone(),
+            snd_workdir_folder,
+            StorageManagerConfig {
+                new_file_chunk_size: 1024 * 64,
+                max_folder_size: None,
+                split_file_if_n_chunks_saved: None,
+            },
+        )
+        .unwrap();
 
         let mut rcv_file_server =
             receiver::Reciever::new(rcv_pending_folder, rcv_finished_folder.clone()).unwrap();

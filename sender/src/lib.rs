@@ -15,6 +15,8 @@ mod managed_file;
 mod storage_manager;
 mod tempdir;
 
+pub use storage_manager::StorageManagerConfig;
+
 pub struct DownlinkServer {
     background_runner_messages: Sender<DownlinkServerMessage>,
     join_handles: Vec<JoinHandle<()>>,
@@ -24,7 +26,7 @@ impl DownlinkServer {
     pub fn spawn(
         input_folder: PathBuf,
         workdir: PathBuf,
-        new_file_chunk_size: u32,
+        storage_config: StorageManagerConfig,
     ) -> anyhow::Result<Self> {
         let (message_snd, message_rcv) = crossbeam_channel::unbounded();
 
@@ -36,7 +38,7 @@ impl DownlinkServer {
                 .context("Failed to spawn file poller")?;
 
         let server_join_handle =
-            run_downlink_server_bg_runner(ready_folder, message_rcv, new_file_chunk_size)?;
+            run_downlink_server_bg_runner(ready_folder, message_rcv, storage_config)?;
 
         Ok(Self {
             background_runner_messages: message_snd,
