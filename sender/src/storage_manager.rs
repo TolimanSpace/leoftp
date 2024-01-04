@@ -97,6 +97,21 @@ impl StorageManager {
                 self.delete_file_by_id(file_id)?;
                 Ok(())
             }
+            ControlMessage::SetFilePriority(set_priority) => {
+                let file_id = set_priority.file_id;
+                let priority = set_priority.priority;
+
+                let file = self.files.get_mut(&file_id);
+
+                let Some(file) = file else {
+                    tracing::info!("Received priority set for non-existent file: {}", file_id);
+                    return Ok(());
+                };
+
+                file.set_all_parts_priorities(priority)?;
+
+                Ok(())
+            }
         }
     }
 

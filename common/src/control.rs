@@ -7,6 +7,7 @@ use crate::{binary_serialize::BinarySerialize, file_part_id::FilePartId, validit
 pub enum ControlMessage {
     ConfirmPart(ConfirmPart),
     DeleteFile(DeleteFile),
+    SetFilePriority(SetFilePriority),
 }
 
 impl std::fmt::Display for ControlMessage {
@@ -24,6 +25,11 @@ impl std::fmt::Display for ControlMessage {
                     msg.file_id,
                 )
             }
+            ControlMessage::SetFilePriority(msg) => write!(
+                f,
+                "ControlMessage::SetFilePriority {{ file_id: {}, priority: {} }}",
+                msg.file_id, msg.priority,
+            ),
         }
     }
 }
@@ -105,6 +111,48 @@ impl BinarySerialize for DeleteFile {
 }
 
 impl ValidityCheck for DeleteFile {
+    fn is_valid(&self) -> bool {
+        true
+    }
+}
+
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+/// Set a file's priority (for every part in the file)
+pub struct SetFilePriority {
+    pub file_id: Uuid,
+    pub priority: i16,
+}
+
+impl BinarySerialize for SetFilePriority {
+    fn serialize_to_stream(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        writer.write_all(self.file_id.as_bytes())?;
+        writer.write_all(&self.priority.to_le_bytes())?;
+
+        Ok(())
+    }
+
+    fn length_when_serialized(&self) -> u32 {
+        16 + 2
+    }
+
+    fn deserialize_from_stream(reader: &mut impl std::io::Read) -> std::io::Result<Self>
+    where
+        Self: Sized,
+    {
+        let mut id = [0u8; 16];
+        reader.read_exact(&mut id)?;
+        let file_id = Uuid::from_bytes(id);
+
+        let mut priority_bytes = [0u8; 2];
+        reader.read_exact(&mut priority_bytes)?;
+        let priority = i16::from_le_bytes(priority_bytes);
+
+        Ok(SetFilePriority { file_id, priority })
+    }
+}
+
+impl ValidityCheck for SetFilePriority {
     fn is_valid(&self) -> bool {
         true
     }

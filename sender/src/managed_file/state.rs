@@ -104,10 +104,9 @@ impl ManagedFileState {
 
     pub fn modify_all_part_priorities(
         &mut self,
-        part: FilePartId,
         mut modify: impl FnMut(&mut i16),
     ) -> anyhow::Result<()> {
-        for part in self.remaining_parts.iter_mut().filter(|p| p.part == part) {
+        for part in self.remaining_parts.iter_mut() {
             modify(&mut part.priority);
         }
 
@@ -263,7 +262,7 @@ mod tests {
     fn test_update_all_priorities() {
         test_changes(100, |state| {
             assert_eq!(state.remaining_parts()[51].priority, 0);
-            state.modify_all_part_priorities(FilePartId::Part(50), |priority| {
+            state.modify_all_part_priorities(|priority| {
                 *priority = 100;
             })?;
             assert_eq!(state.remaining_parts()[51].priority, 100);

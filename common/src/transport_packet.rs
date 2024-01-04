@@ -21,6 +21,7 @@ pub enum TransportPacketData {
     DataChunk(crate::chunks::DataChunk),                // 1
     AcknowledgementPacket(crate::control::ConfirmPart), // 128
     DeleteFile(crate::control::DeleteFile),             // 129
+    SetFilePriority(crate::control::SetFilePriority),   // 130
 }
 
 impl TransportPacketData {
@@ -59,6 +60,9 @@ impl TransportPacketData {
             crate::control::ControlMessage::DeleteFile(delete_file) => {
                 TransportPacketData::DeleteFile(delete_file)
             }
+            crate::control::ControlMessage::SetFilePriority(set_file_priority) => {
+                TransportPacketData::SetFilePriority(set_file_priority)
+            }
         }
     }
 }
@@ -82,6 +86,10 @@ impl BinarySerialize for TransportPacketData {
                 writer.write_all(&[129])?;
                 delete_file.serialize_to_stream(writer)
             }
+            TransportPacketData::SetFilePriority(set_file_priority) => {
+                writer.write_all(&[130])?;
+                set_file_priority.serialize_to_stream(writer)
+            }
         }
     }
 
@@ -91,6 +99,9 @@ impl BinarySerialize for TransportPacketData {
             TransportPacketData::DataChunk(data_chunk) => data_chunk.length_when_serialized(),
             TransportPacketData::AcknowledgementPacket(ack) => ack.length_when_serialized(),
             TransportPacketData::DeleteFile(delete_file) => delete_file.length_when_serialized(),
+            TransportPacketData::SetFilePriority(set_file_priority) => {
+                set_file_priority.length_when_serialized()
+            }
         };
 
         1 // Type
@@ -298,6 +309,7 @@ impl ValidityCheck for TransportPacketData {
             TransportPacketData::DataChunk(data_chunk) => data_chunk.is_valid(),
             TransportPacketData::AcknowledgementPacket(ack) => ack.is_valid(),
             TransportPacketData::DeleteFile(delete_file) => delete_file.is_valid(),
+            TransportPacketData::SetFilePriority(set_file_priority) => set_file_priority.is_valid(),
         }
     }
 }
