@@ -453,7 +453,7 @@ impl ManagedFile {
     pub fn set_all_parts_priorities(&mut self, priority: i16) -> anyhow::Result<()> {
         self.state.modify_all_part_priorities(|p| {
             *p = priority;
-        });
+        })?;
 
         Ok(())
     }
