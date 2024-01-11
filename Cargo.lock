@@ -116,18 +116,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "common"
-version = "0.1.0"
-dependencies = [
- "arbitrary",
- "bincode",
- "serde",
- "serde_json",
- "twox-hash",
- "uuid",
-]
-
-[[package]]
 name = "core-foundation-sys"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -223,6 +211,46 @@ name = "lazy_static"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2abad23fbc42b3700f2f279844dc832adb2b2eb069b2df918f455c4e18cc646"
+
+[[package]]
+name = "leoftp-common"
+version = "0.1.0"
+dependencies = [
+ "arbitrary",
+ "bincode",
+ "serde",
+ "serde_json",
+ "twox-hash",
+ "uuid",
+]
+
+[[package]]
+name = "leoftp-receiver"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "leoftp-common",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "leoftp-sender"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "chrono",
+ "crossbeam-channel",
+ "leoftp-common",
+ "num-derive",
+ "num-traits",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid",
+ "xxhash-rust",
+]
 
 [[package]]
 name = "libc"
@@ -363,16 +391,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "receiver"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "common",
- "serde_json",
- "uuid",
-]
-
-[[package]]
 name = "rustc-demangle"
 version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -383,24 +401,6 @@ name = "ryu"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ad4cc8da4ef723ed60bced201181d83791ad433213d8c24efffda1eec85d741"
-
-[[package]]
-name = "sender"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bincode",
- "chrono",
- "common",
- "crossbeam-channel",
- "num-derive",
- "num-traits",
- "serde",
- "serde_json",
- "tracing",
- "uuid",
- "xxhash-rust",
-]
 
 [[package]]
 name = "serde"
@@ -469,11 +469,11 @@ dependencies = [
 name = "tester"
 version = "0.1.0"
 dependencies = [
- "common",
  "crossbeam-channel",
+ "leoftp-common",
+ "leoftp-receiver",
+ "leoftp-sender",
  "rand",
- "receiver",
- "sender",
  "tracing",
  "tracing-subscriber",
 ]

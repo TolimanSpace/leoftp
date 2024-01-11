@@ -37,23 +37,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
-name = "common"
-version = "0.1.0"
-dependencies = [
- "arbitrary",
- "bincode",
- "serde",
- "serde_json",
- "twox-hash",
- "uuid",
-]
-
-[[package]]
 name = "common-fuzz"
 version = "0.0.0"
 dependencies = [
  "arbitrary",
- "common",
+ "leoftp-common",
  "libfuzzer-sys",
 ]
 
@@ -92,6 +80,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c37f63953c4c63420ed5fd3d6d398c719489b9f872b9fa683262f8edd363c7d"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "leoftp-common"
+version = "0.1.0"
+dependencies = [
+ "arbitrary",
+ "bincode",
+ "serde",
+ "serde_json",
+ "twox-hash",
+ "uuid",
 ]
 
 [[package]]

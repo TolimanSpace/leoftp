@@ -6,9 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sender = { path = "../sender" }
-receiver = { path = "../receiver" }
-common = { path = "../common" }
+sender = { path = "../sender", package = "leoftp-sender" }
+receiver = { path = "../receiver", package = "leoftp-receiver" }
+common = { path = "../common", package = "leoftp-common" }
 crossbeam-channel = "0.5.8"
 rand = "0.8.5"
 tracing = "0.1.40"

@@ -14,6 +14,7 @@ arbitrary = { version = "1.3.2", features = ["derive"] }
 [dependencies.common]
 path = ".."
 features = ["fuzzing"]
+package = "leoftp-common"
 
 # Prevent this from interfering with workspaces
 [workspace]
