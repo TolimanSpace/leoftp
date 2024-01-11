@@ -51,7 +51,7 @@ impl DownlinkServer {
         })
     }
 
-    pub fn add_control_message_reader(&mut self, reader: impl 'static + Read + Send) {
+    pub fn add_control_message_reader(&self, reader: impl 'static + Read + Send) {
         let handle = spawn_control_reader(reader, self.background_runner_messages.clone());
         self.join_handles.lock().unwrap().push(handle);
     }
