@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     fs::File,
     io::{self, Write},
     path::{Path, PathBuf},
@@ -8,6 +9,7 @@ use anyhow::Context;
 use common::{
     chunks::{Chunk, HeaderChunk},
     control::{ConfirmPart, ControlMessage},
+    file_part_id::FilePartId,
 };
 use uuid::Uuid;
 
@@ -22,7 +24,7 @@ pub struct Reciever {
     workdir_folder: PathBuf,
     result_folder: PathBuf,
 
-    control_msg_queue: Vec<ControlMessage>,
+    confirmed_parts: HashMap<Uuid, Vec<FilePartId>>,
 }
 
 impl Reciever {
@@ -35,7 +37,7 @@ impl Reciever {
             workdir_folder,
             result_folder,
 
-            control_msg_queue: Vec::new(),
+            confirmed_parts: HashMap::new(),
         })
     }
 
@@ -50,11 +52,10 @@ impl Reciever {
 
         if is_file_finished(&path)? {
             // Already finished, confirm and ignore
-            self.control_msg_queue
-                .push(ControlMessage::ConfirmPart(ConfirmPart {
-                    file_id,
-                    part_index,
-                }));
+            self.confirmed_parts
+                .entry(file_id)
+                .or_default()
+                .push(part_index);
 
             return Ok(());
         }
@@ -88,11 +89,10 @@ impl Reciever {
             }
         }
 
-        self.control_msg_queue
-            .push(ControlMessage::ConfirmPart(ConfirmPart {
-                file_id,
-                part_index,
-            }));
+        self.confirmed_parts
+            .entry(file_id)
+            .or_default()
+            .push(part_index);
 
         Ok(())
     }
@@ -132,7 +132,43 @@ impl Reciever {
     }
 
     pub fn iter_control_messages(&mut self) -> impl Iterator<Item = ControlMessage> + '_ {
-        self.control_msg_queue.drain(..)
+        #![allow(clippy::unnecessary_unwrap)]
+
+        self.confirmed_parts
+            .drain()
+            .flat_map(|(file_id, mut parts)| {
+                // Sort the parts
+                parts.sort_unstable();
+
+                // Capture inclusive ranges of all the parts
+                let mut ranges = Vec::new();
+                let mut start = None;
+                let mut end = None;
+
+                for part in parts {
+                    if start.is_none() {
+                        start = Some(part);
+                        end = Some(part);
+                    } else if end.unwrap().to_index() == part.to_index() - 1 {
+                        end = Some(part);
+                    } else {
+                        ranges.push((start.unwrap(), end.unwrap()));
+                        start = Some(part);
+                        end = Some(part);
+                    }
+                }
+
+                if start.is_some() {
+                    ranges.push((start.unwrap(), end.unwrap()));
+                }
+
+                ranges.into_iter().map(move |(from, to)| {
+                    ControlMessage::ConfirmPart(ConfirmPart {
+                        file_id,
+                        part_range: common::file_part_id::FilePartIdRangeInclusive::new(from, to),
+                    })
+                })
+            })
     }
 }
 

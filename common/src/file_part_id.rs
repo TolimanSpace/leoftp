@@ -142,11 +142,33 @@ impl BinarySerialize for FilePartIdRangeInclusive {
         let to_int = u32::from_be_bytes(to_bytes);
         let to = FilePartId::from_index(to_int);
 
+        if from > to {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid FilePartIdRangeInclusive: from {} > to {}",
+                    from, to
+                ),
+            ));
+        }
+
         Ok(Self { from, to })
     }
 
     fn length_when_serialized(&self) -> u32 {
         8
+    }
+}
+
+impl ValidityCheck for FilePartIdRangeInclusive {
+    fn is_valid(&self) -> bool {
+        self.from.is_valid() && self.to.is_valid() && self.from <= self.to
+    }
+}
+
+impl std::fmt::Display for FilePartIdRangeInclusive {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{}, {}]", self.from, self.to)
     }
 }
 

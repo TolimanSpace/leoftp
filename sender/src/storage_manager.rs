@@ -76,7 +76,7 @@ impl StorageManager {
         match control {
             ControlMessage::ConfirmPart(confirm) => {
                 let file_id = confirm.file_id;
-                let part_index = confirm.part_index;
+                let part_range = confirm.part_range;
 
                 let file = self.files.get_mut(&file_id);
 
@@ -85,7 +85,7 @@ impl StorageManager {
                     return Ok(());
                 };
 
-                file.acknowledge_file_parts(FilePartIdRangeInclusive::new_single(part_index))?;
+                file.acknowledge_file_parts(part_range)?;
                 if file.is_finished() {
                     self.delete_file_by_id(file_id)?;
                 }

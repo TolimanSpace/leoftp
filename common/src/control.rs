@@ -1,6 +1,9 @@
 use uuid::Uuid;
 
-use crate::{binary_serialize::BinarySerialize, file_part_id::FilePartId, validity::ValidityCheck};
+use crate::{
+    binary_serialize::BinarySerialize, file_part_id::FilePartIdRangeInclusive,
+    validity::ValidityCheck,
+};
 
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -15,8 +18,8 @@ impl std::fmt::Display for ControlMessage {
         match self {
             ControlMessage::ConfirmPart(msg) => write!(
                 f,
-                "ControlMessage::ConfirmPart {{ file_id: {}, part_index: {} }}",
-                msg.file_id, msg.part_index,
+                "ControlMessage::ConfirmPart {{ file_id: {}, part_range: {} }}",
+                msg.file_id, msg.part_range,
             ),
             ControlMessage::DeleteFile(msg) => {
                 write!(
@@ -39,19 +42,19 @@ impl std::fmt::Display for ControlMessage {
 /// Confirm that a part of a file was successfully received
 pub struct ConfirmPart {
     pub file_id: Uuid,
-    pub part_index: FilePartId,
+    pub part_range: FilePartIdRangeInclusive,
 }
 
 impl BinarySerialize for ConfirmPart {
     fn serialize_to_stream(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
         writer.write_all(self.file_id.as_bytes())?;
-        writer.write_all(&self.part_index.to_index().to_le_bytes())?;
+        self.part_range.serialize_to_stream(writer)?;
 
         Ok(())
     }
 
     fn length_when_serialized(&self) -> u32 {
-        16 + 4
+        16 + self.part_range.length_when_serialized()
     }
 
     fn deserialize_from_stream(reader: &mut impl std::io::Read) -> std::io::Result<Self>
@@ -62,21 +65,18 @@ impl BinarySerialize for ConfirmPart {
         reader.read_exact(&mut id)?;
         let file_id = Uuid::from_bytes(id);
 
-        let mut part_bytes = [0u8; 4];
-        reader.read_exact(&mut part_bytes)?;
-        let part = u32::from_le_bytes(part_bytes);
-        let part = FilePartId::from_index(part);
+        let part_range = FilePartIdRangeInclusive::deserialize_from_stream(reader)?;
 
         Ok(ConfirmPart {
             file_id,
-            part_index: part,
+            part_range,
         })
     }
 }
 
 impl ValidityCheck for ConfirmPart {
     fn is_valid(&self) -> bool {
-        self.part_index.is_valid()
+        self.part_range.is_valid()
     }
 }
 
@@ -162,13 +162,18 @@ impl ValidityCheck for SetFilePriority {
 mod tests {
     use std::io::Cursor;
 
+    use crate::file_part_id::FilePartId;
+
     use super::*;
 
     #[test]
     fn test_confirm_part_serialization() {
         let msg = ConfirmPart {
             file_id: Uuid::new_v4(),
-            part_index: FilePartId::Part(42),
+            part_range: FilePartIdRangeInclusive {
+                from: FilePartId::from_index(0),
+                to: FilePartId::from_index(10),
+            },
         };
 
         let mut buf = Vec::new();
