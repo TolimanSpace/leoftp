@@ -24,6 +24,9 @@ pub enum DownlinkServerMessage {
     /// Begin a new downlink session, sending chunks to the new chunk queue. The session
     /// will end when the receiver is dropped.
     BeginDownlinkSession(Sender<Option<Chunk>>),
+    /// End the downlink session, and transition to the waiting state. The sender gets
+    /// dropped, so the session has successfully ended when the receiver disconnects.
+    EndDownlinkSession,
     /// Stop the downlink background runner and quit. This should be called when the
     /// service is dropped.
     StopAndQuit,
@@ -120,7 +123,7 @@ impl BackgroundRunnerDownlinkSessionState {
                         }
                         SendTimeoutError::Disconnected(_) => {
                             // The receiver is gone. End the downlink session.
-                            tracing::info!("Chunk receiver disconnected. Ending downlink session.");
+                            tracing::error!("Chunk receiver disconnected unexpectedly. Ending downlink session.");
                             return Some(self.transition_to_waiting_state());
                         }
                     }
@@ -162,6 +165,11 @@ impl BackgroundRunnerDownlinkSessionState {
                     DownlinkServerMessage::StopAndQuit => {
                         // We're done here
                         return None;
+                    }
+                    DownlinkServerMessage::EndDownlinkSession => {
+                        // End the downlink session
+                        tracing::info!("Received notification to end downlink session");
+                        return Some(self.transition_to_waiting_state());
                     }
                 }
             }
@@ -230,6 +238,10 @@ impl BackgroundRunnerWaitingState {
                     DownlinkServerMessage::StopAndQuit => {
                         // We're done here
                         return None;
+                    }
+                    DownlinkServerMessage::EndDownlinkSession => {
+                        // We're not in a downlink session, so we can't end one.
+                        tracing::error!("Received notification to end downlink session while not in a downlink session");
                     }
                 }
             }

@@ -121,6 +121,18 @@ impl DownlinkReader {
     }
 }
 
+impl Drop for DownlinkReader {
+    fn drop(&mut self) {
+        // Notify the background runner that the session is over
+        self.background_runner_messages
+            .send(DownlinkServerMessage::EndDownlinkSession)
+            .ok();
+
+        // Wait until the receiver disconnects
+        while self.chunks.recv().is_ok() {}
+    }
+}
+
 fn spawn_control_reader(
     control_reader: impl 'static + Read + Send,
     control_snd: Sender<DownlinkServerMessage>,
