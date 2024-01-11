@@ -1,4 +1,4 @@
-use std::{io::Read, path::PathBuf, thread::JoinHandle};
+use std::{io::Read, path::PathBuf, sync::Mutex, thread::JoinHandle};
 
 use anyhow::Context;
 use common::{
@@ -19,7 +19,7 @@ pub use storage_manager::StorageManagerConfig;
 
 pub struct DownlinkServer {
     background_runner_messages: Sender<DownlinkServerMessage>,
-    join_handles: Vec<JoinHandle<()>>,
+    join_handles: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl DownlinkServer {
@@ -47,13 +47,13 @@ impl DownlinkServer {
 
         Ok(Self {
             background_runner_messages: message_snd,
-            join_handles: vec![server_join_handle, poller_join_handle],
+            join_handles: Mutex::new(vec![server_join_handle, poller_join_handle]),
         })
     }
 
     pub fn add_control_message_reader(&mut self, reader: impl 'static + Read + Send) {
         let handle = spawn_control_reader(reader, self.background_runner_messages.clone());
-        self.join_handles.push(handle);
+        self.join_handles.lock().unwrap().push(handle);
     }
 
     pub fn begin_downlink_session(&self) -> anyhow::Result<DownlinkReader> {
@@ -68,12 +68,12 @@ impl DownlinkServer {
         })
     }
 
-    pub fn join(mut self) {
+    pub fn join(self) {
         self.background_runner_messages
             .send(DownlinkServerMessage::StopAndQuit)
             .ok();
 
-        for handle in self.join_handles.drain(..) {
+        for handle in self.join_handles.lock().unwrap().drain(..) {
             handle.join().ok();
         }
     }
