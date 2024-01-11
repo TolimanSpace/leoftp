@@ -33,6 +33,11 @@ impl DownlinkServer {
         let pending_folder = workdir.join("pending");
         let ready_folder = workdir.join("ready");
 
+        // Create the folders
+        std::fs::create_dir_all(&input_folder)?;
+        std::fs::create_dir_all(&pending_folder)?;
+        std::fs::create_dir_all(&ready_folder)?;
+
         let poller_join_handle =
             spawn_file_poller(input_folder, pending_folder, message_snd.clone())
                 .context("Failed to spawn file poller")?;
