@@ -91,6 +91,7 @@ impl Ord for FilePartId {
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub struct FilePartIdRangeInclusive {
     pub from: FilePartId,
     pub to: FilePartId,

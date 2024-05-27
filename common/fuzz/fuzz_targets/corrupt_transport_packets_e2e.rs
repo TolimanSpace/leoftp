@@ -4,7 +4,6 @@ use std::io::Cursor;
 
 use common::{
     binary_serialize::BinarySerialize,
-    chunks::Chunk,
     transport_packet::{parse_transport_packet_stream, TransportPacket, TransportPacketData},
     validity::ValidityCheck,
 };
