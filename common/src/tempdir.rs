@@ -20,8 +20,7 @@ impl TempDirProvider {
         TempDir::new(path)
     }
 
-    #[cfg(test)]
-    pub fn new_test() -> Self {
+    pub fn new_for_test() -> Self {
         let base = PathBuf::from("_tempfs");
 
         Self::new(base)

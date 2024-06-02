@@ -4,7 +4,7 @@ use std::{
     path::PathBuf,
 };
 
-use common::file_part_id::FilePartId;
+use crate::file_part_id::FilePartId;
 
 use super::write_file_atomic;
 
@@ -210,7 +210,7 @@ mod tests {
         part_count: u32,
         execute: impl FnOnce(&mut ManagedFileState) -> anyhow::Result<()>,
     ) {
-        let folder = TempDirProvider::new_test().create().unwrap();
+        let folder = TempDirProvider::new_for_test().create().unwrap();
         let path = folder.path().join("state.bin");
 
         let mut state = ManagedFileState::new_from_part_count(part_count, path.clone()).unwrap();

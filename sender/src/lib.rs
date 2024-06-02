@@ -3,6 +3,7 @@ use std::{io::Read, path::PathBuf, sync::Mutex, thread::JoinHandle};
 use anyhow::Context;
 use common::{
     chunks::Chunk,
+    file_sending::storage_manager::StorageManagerConfig,
     transport_packet::{parse_transport_packet_stream, TransportPacket, TransportPacketData},
 };
 use crossbeam_channel::{Receiver, Sender};
@@ -11,11 +12,6 @@ use self::background_runner::{run_downlink_server_bg_runner, DownlinkServerMessa
 
 mod background_runner;
 mod downlink_session;
-mod managed_file;
-mod storage_manager;
-mod tempdir;
-
-pub use storage_manager::StorageManagerConfig;
 
 pub struct DownlinkServer {
     background_runner_messages: Sender<DownlinkServerMessage>,

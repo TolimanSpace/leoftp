@@ -1,8 +1,11 @@
-use common::{chunks::Chunk, control::ControlMessage, file_part_id::FilePartId};
-
-use crate::storage_manager::cmp_file_storage_part_normal;
-
-use super::storage_manager::{StorageFilePart, StorageManager};
+use common::{
+    chunks::Chunk,
+    control::ControlMessage,
+    file_part_id::FilePartId,
+    file_sending::storage_manager::{
+        cmp_file_storage_part_normal, StorageFilePart, StorageManager,
+    },
+};
 
 /// A single "downlink session". Sorts all chunks by priority and sends them all.
 /// Once all chunks are sent, it loops from the start. The downlink session can only

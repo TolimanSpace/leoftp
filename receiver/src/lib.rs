@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::Context;
 use common::{
-    chunks::{Chunk, HeaderChunk},
+    chunks::{Chunk, DataChunk, HeaderChunk},
     control::{ConfirmPart, ControlMessage},
     file_part_id::FilePartId,
 };
@@ -17,6 +17,7 @@ use uuid::Uuid;
 // [file uuid]/
 //     header.json        - The header of the file, if received (can be absent)
 //     [part index].bin   - The received parts of the file, added as they are received
+//     finished           - A file is finished when this file exists. This is for tracking files that were historically completed, but the confirmation was lost.
 
 // A file is finished when all the parts are present
 
@@ -25,6 +26,7 @@ pub struct Reciever {
     result_folder: PathBuf,
 
     confirmed_parts: HashMap<Uuid, Vec<FilePartId>>,
+    finished_files: Vec<PathBuf>,
 }
 
 impl Reciever {
@@ -38,6 +40,7 @@ impl Reciever {
             result_folder,
 
             confirmed_parts: HashMap::new(),
+            finished_files: Vec::new(),
         })
     }
 
@@ -45,54 +48,36 @@ impl Reciever {
         self.workdir_folder.join(file_id.to_string())
     }
 
+    fn add_confirmation_for_file_part(&mut self, file_id: Uuid, part_index: FilePartId) {
+        self.confirmed_parts
+            .entry(file_id)
+            .or_default()
+            .push(part_index);
+    }
+
     pub fn receive_chunk(&mut self, chunk: Chunk) -> anyhow::Result<()> {
         let file_id = chunk.file_id();
         let part_index = chunk.part_index();
         let path = self.get_data_folder_path_for_id(file_id);
 
-        if is_file_finished(&path)? {
-            // Already finished, confirm and ignore
-            self.confirmed_parts
-                .entry(file_id)
-                .or_default()
-                .push(part_index);
+        let managed_file = ManagedReceivingFile::open_or_create(path)?;
 
+        if managed_file.is_finished()? {
+            // Already finished, make a confirmation and ignore
+            self.add_confirmation_for_file_part(file_id, part_index);
             return Ok(());
         }
 
-        // Ensure the folder for this file exists
-        let file_data_folder = get_data_folder_path(&path);
-        std::fs::create_dir_all(&file_data_folder)?;
-
         match chunk {
             Chunk::Header(header_chunk) => {
-                // Write the header json
-                let header_json_tmp_path = file_data_folder.join("header.json.tmp");
-                let mut header_json_file = File::create(&header_json_tmp_path)
-                    .context("Failed to create header json file in destination folder")?;
-
-                serde_json::to_writer(&mut header_json_file, &header_chunk)
-                    .context("Failed to write header json file")?;
-
-                // Copy the header json to the final location
-                let header_json_path = file_data_folder.join("header.json");
-                std::fs::rename(header_json_tmp_path, header_json_path)?;
+                managed_file.receive_header_chunk(header_chunk)?;
             }
             Chunk::Data(data_chunk) => {
-                let filename = format!("{}.bin", data_chunk.part);
-
-                let part_path = file_data_folder.join(filename);
-                let mut part_file = File::create(part_path)
-                    .context("Failed to create part file in destination folder")?;
-
-                part_file.write_all(&data_chunk.data)?;
+                managed_file.receive_data_chunk(data_chunk)?;
             }
         }
 
-        self.confirmed_parts
-            .entry(file_id)
-            .or_default()
-            .push(part_index);
+        self.add_confirmation_for_file_part(file_id, part_index);
 
         Ok(())
     }
@@ -111,20 +96,22 @@ impl Reciever {
         Ok(folders)
     }
 
-    pub fn output_finished_files(&self) -> anyhow::Result<()> {
+    pub fn output_finished_files(&mut self) -> anyhow::Result<()> {
         // List all unfinished file folders
         let file_folders = self.get_all_file_folders()?;
 
         for file_folder in file_folders {
-            if is_file_finished(&file_folder)? {
+            let managed_file = ManagedReceivingFile::open_or_create(file_folder)?;
+
+            if managed_file.is_finished()? {
                 continue;
             }
 
-            if is_file_data_finished(&file_folder)? {
-                write_finished_file_to_output_folder(&file_folder, &self.result_folder)?;
+            if managed_file.is_file_data_finished()? {
+                let path =
+                    managed_file.write_finished_file_to_output_folder(&self.result_folder)?;
 
-                // Mark as finished
-                mark_folder_as_finished(&file_folder)?;
+                self.finished_files.push(path);
             }
         }
 
@@ -170,81 +157,130 @@ impl Reciever {
                 })
             })
     }
+
+    pub fn iter_finished_files(&mut self) -> impl Iterator<Item = PathBuf> + '_ {
+        self.finished_files.drain(..)
+    }
 }
 
-fn get_data_folder_path(path: &Path) -> PathBuf {
-    path.join("data")
+pub struct ManagedReceivingFile {
+    path: PathBuf,
 }
 
-fn get_marker_file_path(path: &Path) -> PathBuf {
-    path.join("finished")
-}
+impl ManagedReceivingFile {
+    pub fn open_or_create(path: PathBuf) -> anyhow::Result<Self> {
+        let file = Self { path };
+        std::fs::create_dir_all(&file.path)?;
+        std::fs::create_dir_all(&file.get_data_folder_path())?;
 
-fn is_file_finished(path: &Path) -> anyhow::Result<bool> {
-    let marker_file = get_marker_file_path(path);
-    Ok(marker_file.try_exists()?)
-}
-
-fn mark_folder_as_finished(path: &Path) -> anyhow::Result<()> {
-    // Delete the data
-    let data_folder = get_data_folder_path(path);
-    std::fs::remove_dir_all(data_folder)?;
-
-    // Create the marker file
-    let marker_file = get_marker_file_path(path);
-    File::create(marker_file)?;
-    Ok(())
-}
-
-fn is_file_data_finished(file_folder: &Path) -> anyhow::Result<bool> {
-    let data_folder = get_data_folder_path(file_folder);
-
-    let header_json_path = data_folder.join("header.json");
-    if !header_json_path.exists() {
-        return Ok(false);
+        Ok(file)
     }
 
-    let header: HeaderChunk = serde_json::from_reader(File::open(header_json_path)?)?;
+    pub fn is_finished(&self) -> anyhow::Result<bool> {
+        let marker_file = self.get_marker_file_path();
+        Ok(marker_file.try_exists()?)
+    }
 
-    for part_index in 0..header.part_count {
-        let filename = format!("{}.bin", part_index);
-        let part_path = data_folder.join(filename);
-
-        if !part_path.exists() {
+    pub fn is_file_data_finished(&self) -> anyhow::Result<bool> {
+        let header_json_path = self.get_header_json_path();
+        if !header_json_path.exists() {
             return Ok(false);
         }
+
+        let header: HeaderChunk = self.get_header()?;
+        for part_index in 0..header.part_count {
+            let part_path = self.get_bin_path(part_index);
+
+            if !part_path.exists() {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 
-    Ok(true)
-}
+    pub fn receive_header_chunk(&self, chunk: HeaderChunk) -> anyhow::Result<()> {
+        let header_json_tmp_path = self.get_header_json_path().with_extension(".json.tmp");
+        let mut header_json_file = File::create(&header_json_tmp_path)
+            .context("Failed to create header json file in destination folder")?;
 
-fn write_finished_file_to_output_folder(
-    file_folder: &Path,
-    output_folder: &Path,
-) -> anyhow::Result<()> {
-    let data_folder = get_data_folder_path(file_folder);
-    let header_json_path = data_folder.join("header.json");
-    let header: HeaderChunk = serde_json::from_reader(File::open(header_json_path)?)?;
+        serde_json::to_writer(&mut header_json_file, &chunk)
+            .context("Failed to write header json file")?;
 
-    let filename = header.name;
+        // Copy the header json to the final location
+        let header_json_path = self.get_header_json_path();
+        std::fs::rename(header_json_tmp_path, header_json_path)?;
 
-    // Find a valid filename for the output folder, adding `(n)` to the end if necessary
-    let mut output_path = output_folder.join(&filename);
-    let mut i = 0;
-    while output_path.exists() {
-        i += 1;
-        output_path = output_folder.join(format!("{} ({})", &filename, i));
+        Ok(())
     }
 
-    let mut output = File::create(output_path)?;
-    for part_index in 0..header.part_count {
+    pub fn receive_data_chunk(&self, chunk: DataChunk) -> anyhow::Result<()> {
+        let part_path = self.get_bin_path(chunk.part);
+        let mut part_file =
+            File::create(part_path).context("Failed to create part file in destination folder")?;
+
+        part_file.write_all(&chunk.data)?;
+
+        Ok(())
+    }
+
+    pub fn write_finished_file_to_output_folder(
+        self,
+        output_folder: &Path,
+    ) -> anyhow::Result<PathBuf> {
+        let header: HeaderChunk = self.get_header()?;
+
+        let filename = header.name;
+
+        // Find a valid filename for the output folder, adding `(n)` to the end if necessary
+        let mut output_path = output_folder.join(&filename);
+        let mut i = 0;
+        while output_path.exists() {
+            i += 1;
+            output_path = output_folder.join(format!("{} ({})", &filename, i));
+        }
+
+        let mut output = File::create(&output_path)?;
+        for part_index in 0..header.part_count {
+            let part_path = self.get_bin_path(part_index);
+            let mut part_file = File::open(part_path)?;
+
+            io::copy(&mut part_file, &mut output)?;
+        }
+
+        // Create the marker file
+        let marker_file = self.get_marker_file_path();
+        File::create(marker_file)?;
+
+        // Delete the data
+        let data_folder = self.get_data_folder_path();
+        std::fs::remove_dir_all(data_folder)?;
+
+        Ok(output_path)
+    }
+
+    fn get_data_folder_path(&self) -> PathBuf {
+        self.path.join("data")
+    }
+
+    fn get_header_json_path(&self) -> PathBuf {
+        self.path.join("header.json")
+    }
+
+    fn get_marker_file_path(&self) -> PathBuf {
+        self.path.join("finished")
+    }
+
+    fn get_bin_path(&self, part_index: u32) -> PathBuf {
+        let data_folder = self.get_data_folder_path();
         let filename = format!("{}.bin", part_index);
-        let part_path = data_folder.join(filename);
-
-        let mut part_file = File::open(part_path)?;
-
-        io::copy(&mut part_file, &mut output)?;
+        data_folder.join(filename)
     }
 
-    Ok(())
+    fn get_header(&self) -> anyhow::Result<HeaderChunk> {
+        let header_json_path = self.get_header_json_path();
+        let header: HeaderChunk = serde_json::from_reader(File::open(header_json_path)?)?;
+
+        Ok(header)
+    }
 }

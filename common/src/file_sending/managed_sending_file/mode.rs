@@ -1,6 +1,6 @@
 use std::io;
 
-use common::binary_serialize::BinarySerialize;
+use crate::binary_serialize::BinarySerialize;
 use num_derive::{FromPrimitive, ToPrimitive};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, FromPrimitive, ToPrimitive)]
@@ -44,5 +44,27 @@ impl BinarySerialize for ManagedFileMode {
         };
 
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+
+    #[test]
+    fn test_mode_serialization() {
+        let modes = [ManagedFileMode::Contiguous, ManagedFileMode::Split];
+
+        for mode in modes {
+            let mut buf = Vec::new();
+            mode.serialize_to_stream(&mut buf).unwrap();
+
+            let mut cursor = Cursor::new(buf);
+            let deserialized_mode = ManagedFileMode::deserialize_from_stream(&mut cursor).unwrap();
+
+            assert_eq!(mode, deserialized_mode);
+        }
     }
 }

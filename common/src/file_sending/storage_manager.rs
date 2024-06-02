@@ -3,14 +3,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::Context;
-use common::{
+use crate::{
     control::ControlMessage,
     file_part_id::{FilePartId, FilePartIdRangeInclusive},
 };
+use anyhow::Context;
 use uuid::Uuid;
 
-use super::managed_file::{generate_file_header_from_path, ManagedFile};
+use super::managed_sending_file::{generate_file_header_from_path, ManagedSendingFile};
 
 #[derive(Debug, Clone)]
 pub struct StorageManagerConfig {
@@ -26,7 +26,7 @@ pub struct StorageManagerConfig {
 
 pub struct StorageManager {
     path: PathBuf,
-    files: HashMap<Uuid, ManagedFile>,
+    files: HashMap<Uuid, ManagedSendingFile>,
     config: StorageManagerConfig,
 }
 
@@ -49,7 +49,7 @@ impl StorageManager {
                 continue;
             }
 
-            let file = ManagedFile::try_read_from_path(&path)?;
+            let file = ManagedSendingFile::try_read_from_path(&path)?;
             let Some(file) = file else {
                 // File was likely ended, but not cleaned up.
                 continue;
@@ -64,11 +64,11 @@ impl StorageManager {
         })
     }
 
-    pub fn get_file(&self, file_id: Uuid) -> Option<&ManagedFile> {
+    pub fn get_file(&self, file_id: Uuid) -> Option<&ManagedSendingFile> {
         self.files.get(&file_id)
     }
 
-    pub fn get_file_mut(&mut self, file_id: Uuid) -> Option<&mut ManagedFile> {
+    pub fn get_file_mut(&mut self, file_id: Uuid) -> Option<&mut ManagedSendingFile> {
         self.files.get_mut(&file_id)
     }
 
@@ -115,7 +115,7 @@ impl StorageManager {
         }
     }
 
-    pub fn iter_files(&self) -> impl Iterator<Item = &ManagedFile> {
+    pub fn iter_files(&self) -> impl Iterator<Item = &ManagedSendingFile> {
         self.files.values()
     }
 
@@ -222,7 +222,7 @@ impl StorageManager {
             self.delete_parts_until_max_size_reached(remaining_size)?;
         }
 
-        let file = ManagedFile::create_new_from_header(destination_path, path, header)?;
+        let file = ManagedSendingFile::create_new_from_header(destination_path, path, header)?;
 
         self.files.insert(file.header().id, file);
 
@@ -344,7 +344,7 @@ mod tests {
     }
 
     fn make_dummy_file(size: u64) -> anyhow::Result<DummyFile> {
-        let folder = TempDirProvider::new_test().create()?;
+        let folder = TempDirProvider::new_for_test().create()?;
         let path = folder.path().join("data.bin");
 
         let file = File::create(&path)?;
@@ -365,7 +365,7 @@ mod tests {
 
     #[test]
     fn test_shrinking_storage_data() -> anyhow::Result<()> {
-        let folder = TempDirProvider::new_test().create()?;
+        let folder = TempDirProvider::new_for_test().create()?;
 
         let mut storage_manager = StorageManager::new(
             folder.path().clone(),
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn test_shrinking_data_lowest_priority() -> anyhow::Result<()> {
-        let folder = TempDirProvider::new_test().create()?;
+        let folder = TempDirProvider::new_for_test().create()?;
 
         let mut storage_manager = StorageManager::new(
             folder.path().clone(),

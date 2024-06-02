@@ -4,13 +4,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chrono::{DateTime, Utc};
-use common::{
+use crate::{
     binary_serialize::BinarySerialize,
     chunks::{Chunk, DataChunk, HeaderChunk},
     file_part_id::{FilePartId, FilePartIdRangeInclusive},
     substream::SubstreamReader,
 };
+use chrono::{DateTime, Utc};
 
 use self::{
     mode::ManagedFileMode,
@@ -95,14 +95,14 @@ mod state;
 /// then the data file should be deleted after. If zero parts are left, then the managed file can
 /// safely be deleted.
 #[derive(Debug, PartialEq, Eq)]
-pub struct ManagedFile {
+pub struct ManagedSendingFile {
     folder_path: PathBuf,
     header: HeaderChunk,
     mode: ManagedFileMode,
     state: ManagedFileState,
 }
 
-impl ManagedFile {
+impl ManagedSendingFile {
     /// Please reference the doc comment on [`ManagedFile`] for more information.
     pub fn create_new_from_header(
         managed_file_destination_pat: impl AsRef<Path>,
@@ -684,7 +684,7 @@ mod tests {
     }
 
     fn make_dummy_file(size: u64) -> anyhow::Result<DummyFile> {
-        let folder = TempDirProvider::new_test().create()?;
+        let folder = TempDirProvider::new_for_test().create()?;
         let path = folder.path().join("data.bin");
 
         let file = File::create(&path)?;
@@ -715,10 +715,10 @@ mod tests {
         path: impl AsRef<Path>,
         file_size: u64,
         part_size: u64,
-    ) -> anyhow::Result<ManagedFile> {
+    ) -> anyhow::Result<ManagedSendingFile> {
         let header = make_test_header(file_size, part_size);
         let file = make_dummy_file(file_size)?;
-        ManagedFile::create_new_from_header(path, file.path, header)
+        ManagedSendingFile::create_new_from_header(path, file.path, header)
     }
 
     fn assert_file_exists(path: impl AsRef<Path>) {
@@ -745,14 +745,16 @@ mod tests {
         BinarySerialize::deserialize_from_stream(&mut file).unwrap()
     }
 
-    fn assert_equal_after_parsing(path: impl AsRef<Path>, file: &ManagedFile) {
-        let new_file = ManagedFile::try_read_from_path(path).unwrap().unwrap();
+    fn assert_equal_after_parsing(path: impl AsRef<Path>, file: &ManagedSendingFile) {
+        let new_file = ManagedSendingFile::try_read_from_path(path)
+            .unwrap()
+            .unwrap();
         assert_eq!(&new_file, file);
     }
 
     #[test]
     fn test_file_data() -> anyhow::Result<()> {
-        let folder = TempDirProvider::new_test().create()?;
+        let folder = TempDirProvider::new_for_test().create()?;
         let mut file = make_test_managed_file(folder.path(), 100, 10)?;
 
         assert_file_exists(folder.path().join("header.bin"));
@@ -782,7 +784,7 @@ mod tests {
 
     #[test]
     fn test_acknowledging_contiguous() -> anyhow::Result<()> {
-        let folder = TempDirProvider::new_test().create()?;
+        let folder = TempDirProvider::new_for_test().create()?;
         let mut file = make_test_managed_file(folder.path(), 100, 10)?;
         let state = read_state(folder.path());
         assert_eq!(state.remaining_parts().len(), 11);
@@ -846,7 +848,7 @@ mod tests {
 
     #[test]
     fn test_acknowledging_split() -> anyhow::Result<()> {
-        let folder = TempDirProvider::new_test().create()?;
+        let folder = TempDirProvider::new_for_test().create()?;
         let mut file = make_test_managed_file(folder.path(), 100, 10)?;
 
         file.trigger_file_split()?;
@@ -927,7 +929,7 @@ mod tests {
 
     #[test]
     fn test_splitting_after_acknowleding() -> anyhow::Result<()> {
-        let folder = TempDirProvider::new_test().create()?;
+        let folder = TempDirProvider::new_for_test().create()?;
         let mut file = make_test_managed_file(folder.path(), 100, 10)?;
 
         file.acknowledge_file_parts(FilePartIdRangeInclusive::new_single(FilePartId::Part(9)))?;
@@ -961,7 +963,7 @@ mod tests {
 
     #[test]
     fn test_continuous_all_acknowledged() -> anyhow::Result<()> {
-        let folder = TempDirProvider::new_test().create()?;
+        let folder = TempDirProvider::new_for_test().create()?;
         let mut file = make_test_managed_file(folder.path(), 100, 10)?;
 
         file.acknowledge_file_parts(FilePartIdRangeInclusive::new(
@@ -988,7 +990,7 @@ mod tests {
 
     #[test]
     fn test_split_all_acknowledged() -> anyhow::Result<()> {
-        let folder = TempDirProvider::new_test().create()?;
+        let folder = TempDirProvider::new_for_test().create()?;
         let mut file = make_test_managed_file(folder.path(), 100, 10)?;
         file.trigger_file_split()?;
 

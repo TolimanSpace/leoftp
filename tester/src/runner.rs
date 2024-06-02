@@ -6,9 +6,10 @@ use std::{
 
 use common::{
     binary_serialize::BinarySerialize,
+    file_sending::storage_manager::StorageManagerConfig,
     transport_packet::{parse_transport_packet_stream, TransportPacket, TransportPacketData},
 };
-use sender::{DownlinkServer, StorageManagerConfig};
+use sender::DownlinkServer;
 
 use crate::byte_pipe::make_corrupt_pipe;
 

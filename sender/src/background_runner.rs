@@ -5,13 +5,16 @@ use std::{
 };
 
 use anyhow::Context;
-use common::{chunks::Chunk, control::ControlMessage, file_part_id::FilePartId};
+use common::{
+    chunks::Chunk,
+    control::ControlMessage,
+    file_part_id::FilePartId,
+    file_sending::storage_manager::{StorageManager, StorageManagerConfig},
+};
 use crossbeam_channel::{Receiver, SendTimeoutError, Sender};
 use uuid::Uuid;
 
-use crate::storage_manager::StorageManagerConfig;
-
-use super::{downlink_session::DownlinkSession, storage_manager::StorageManager};
+use crate::downlink_session::DownlinkSession;
 
 pub enum DownlinkServerMessage {
     /// Process a control message received from outside

@@ -3,5 +3,7 @@ pub mod chunks;
 pub mod control;
 pub mod file_part_id;
 pub mod substream;
+pub mod tempdir;
 pub mod transport_packet;
 pub mod validity;
+pub mod file_sending;
