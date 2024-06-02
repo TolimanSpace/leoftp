@@ -3,7 +3,7 @@ use common::{
     control::ControlMessage,
     file_part_id::FilePartId,
     file_sending::storage_manager::{
-        cmp_file_storage_part_normal, StorageFilePart, StorageManager,
+        cmp_file_storage_part_normal, SendingStorageManager, StorageFilePart,
     },
 };
 
@@ -12,13 +12,13 @@ use common::{
 /// reduce data used by the service, it can't add new files. Adding new files is
 /// handled by the StorageManager outside of downlink sessions.
 pub struct DownlinkSession {
-    storage: StorageManager,
+    storage: SendingStorageManager,
     parts_queue: Vec<StorageFilePart>,
     parts_queue_index: usize,
 }
 
 impl DownlinkSession {
-    pub fn new(storage: StorageManager) -> Self {
+    pub fn new(storage: SendingStorageManager) -> Self {
         let mut parts_queue = storage
             .iter_remaining_storage_file_parts()
             .collect::<Vec<_>>();
@@ -94,7 +94,7 @@ impl DownlinkSession {
         self.storage.confirm_file_sent(file_id, part_id)
     }
 
-    pub fn into_storage_manager(self) -> StorageManager {
+    pub fn into_storage_manager(self) -> SendingStorageManager {
         self.storage
     }
 }

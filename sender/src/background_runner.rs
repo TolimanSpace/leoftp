@@ -9,7 +9,7 @@ use common::{
     chunks::Chunk,
     control::ControlMessage,
     file_part_id::FilePartId,
-    file_sending::storage_manager::{StorageManager, StorageManagerConfig},
+    file_sending::storage_manager::{SendingStorageManager, SendingStorageManagerConfig},
 };
 use crossbeam_channel::{Receiver, SendTimeoutError, Sender};
 use uuid::Uuid;
@@ -47,15 +47,15 @@ struct BackgroundRunnerDownlinkSessionState {
 /// The background runner is waiting for a downlink session to start. It can't send
 /// chunks, but it can process control messages and add new files.
 struct BackgroundRunnerWaitingState {
-    storage: StorageManager,
+    storage: SendingStorageManager,
 }
 
 pub fn run_downlink_server_bg_runner(
     files_dir: PathBuf,
     message_rcv: Receiver<DownlinkServerMessage>,
-    storage_config: StorageManagerConfig,
+    storage_config: SendingStorageManagerConfig,
 ) -> anyhow::Result<JoinHandle<()>> {
-    let storage = StorageManager::new(files_dir.clone(), storage_config)
+    let storage = SendingStorageManager::new(files_dir.clone(), storage_config)
         .context("Failed to load storage when initializing downlink background runner")?;
 
     let mut prev_waiting_state = BackgroundRunnerWaitingState { storage };

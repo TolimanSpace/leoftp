@@ -6,7 +6,7 @@ use std::{
 
 use common::{
     binary_serialize::BinarySerialize,
-    file_sending::storage_manager::StorageManagerConfig,
+    file_sending::storage_manager::SendingStorageManagerConfig,
     transport_packet::{parse_transport_packet_stream, TransportPacket, TransportPacketData},
 };
 use sender::DownlinkServer;
@@ -34,7 +34,7 @@ impl TestRunner {
         let mut downlink = DownlinkServer::spawn(
             snd_input_folder.clone(),
             snd_workdir_folder,
-            StorageManagerConfig {
+            SendingStorageManagerConfig {
                 new_file_chunk_size: 1024 * 64,
                 max_folder_size: None,
                 split_file_if_n_chunks_saved: None,
@@ -43,7 +43,8 @@ impl TestRunner {
         .unwrap();
 
         let mut rcv_file_server =
-            receiver::Reciever::new(rcv_pending_folder, rcv_finished_folder.clone()).unwrap();
+            receiver::ReceivingStoreManager::new(rcv_pending_folder, rcv_finished_folder.clone())
+                .unwrap();
 
         let kill_flag = Arc::new(AtomicBool::new(false));
 

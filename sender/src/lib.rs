@@ -3,7 +3,7 @@ use std::{io::Read, path::PathBuf, sync::Mutex, thread::JoinHandle};
 use anyhow::Context;
 use common::{
     chunks::Chunk,
-    file_sending::storage_manager::StorageManagerConfig,
+    file_sending::storage_manager::SendingStorageManagerConfig,
     transport_packet::{parse_transport_packet_stream, TransportPacket, TransportPacketData},
 };
 use crossbeam_channel::{Receiver, Sender};
@@ -22,7 +22,7 @@ impl DownlinkServer {
     pub fn spawn(
         input_folder: PathBuf,
         workdir: PathBuf,
-        storage_config: StorageManagerConfig,
+        storage_config: SendingStorageManagerConfig,
     ) -> anyhow::Result<Self> {
         let (message_snd, message_rcv) = crossbeam_channel::unbounded();
 

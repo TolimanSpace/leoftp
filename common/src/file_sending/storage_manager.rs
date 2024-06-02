@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::managed_sending_file::{generate_file_header_from_path, ManagedSendingFile};
 
 #[derive(Debug, Clone)]
-pub struct StorageManagerConfig {
+pub struct SendingStorageManagerConfig {
     /// The chunk size to use for new files
     pub new_file_chunk_size: u32,
 
@@ -24,14 +24,14 @@ pub struct StorageManagerConfig {
     pub split_file_if_n_chunks_saved: Option<u32>,
 }
 
-pub struct StorageManager {
+pub struct SendingStorageManager {
     path: PathBuf,
     files: HashMap<Uuid, ManagedSendingFile>,
-    config: StorageManagerConfig,
+    config: SendingStorageManagerConfig,
 }
 
-impl StorageManager {
-    pub fn new(path: PathBuf, config: StorageManagerConfig) -> anyhow::Result<Self> {
+impl SendingStorageManager {
+    pub fn new(path: PathBuf, config: SendingStorageManagerConfig) -> anyhow::Result<Self> {
         let folder_files = std::fs::read_dir(&path).context("Failed to read storage folder")?;
 
         let mut files = HashMap::new();
@@ -356,7 +356,7 @@ mod tests {
         })
     }
 
-    fn get_remaining_data_part_count(storage_manager: &StorageManager) -> usize {
+    fn get_remaining_data_part_count(storage_manager: &SendingStorageManager) -> usize {
         storage_manager
             .iter_remaining_storage_file_parts()
             .filter(|part| part.part_id != FilePartId::Header)
@@ -367,9 +367,9 @@ mod tests {
     fn test_shrinking_storage_data() -> anyhow::Result<()> {
         let folder = TempDirProvider::new_for_test().create()?;
 
-        let mut storage_manager = StorageManager::new(
+        let mut storage_manager = SendingStorageManager::new(
             folder.path().clone(),
-            StorageManagerConfig {
+            SendingStorageManagerConfig {
                 split_file_if_n_chunks_saved: Some(5),
                 max_folder_size: Some(15),
                 new_file_chunk_size: 1,
@@ -396,9 +396,9 @@ mod tests {
     fn test_shrinking_data_lowest_priority() -> anyhow::Result<()> {
         let folder = TempDirProvider::new_for_test().create()?;
 
-        let mut storage_manager = StorageManager::new(
+        let mut storage_manager = SendingStorageManager::new(
             folder.path().clone(),
-            StorageManagerConfig {
+            SendingStorageManagerConfig {
                 split_file_if_n_chunks_saved: None,
                 max_folder_size: Some(15),
                 new_file_chunk_size: 1,
